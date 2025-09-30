@@ -1,0 +1,115 @@
+[49m[33m[id=2][0m
+[49m[33m[2]#NodeType=nonTEE[0m
+[49m[33m[2]#Total TEE nodes=0[0m
+[49m[33m[2]#faults=1[0m
+[49m[33m[2]constFactor=3[0m
+[49m[33m[2]#views=10[0m
+[49m[33m[2]timeout=5[0m
+[49m[33m[2]opdist=0[0m
+[49m[33mchecking private key[0m
+[49m[33mchecked private key (sign size=72)[0m
+[49m[31mNode 0 isTEE0[0m
+[49m[33m[2]starting handler[0m
+[49m[34m[2]{0}starting handler[0m
+[49m[34m[2]{0}qsize=3tqsize=2[0m
+[2]ENCLAVE:set up id-2
+[2]qsize=3
+[2]ENCLAVE:loaded private key
+[2]ENCLAVE:loaded public keys:0-4
+[49m[34m[2]{0}enclave variables are initialized[0m
+[49m[34m[2]{0}connecting...[0m
+[49m[34m[2]{0}added peer:0[0m
+[49m[34m[2]{0}added peer:1[0m
+[49m[34m[2]{0}added peer:3[0m
+[49m[31m[2]{0}TEEaccumComb[0m
+[49m[34m[2]{0}starting with:NEWVIEW-COMB[RDATA[#0,0,#1,0,PH_NEWVIEW],S[1,2]][0m
+[49m[34m[2]{0}sending:NEWVIEW-COMB[RDATA[#0,0,#1,0,PH_NEWVIEW],S[1,2]]->0;[0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,3,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,3,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,7,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,7,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,11,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,11,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,15,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,15,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,19,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,19,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,23,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,23,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,27,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,27,-][0m
+[49m[34m[2]{0}handling:[49m[34m[2]{0}handling:TRANSACTION[TR[0,31,-],S[0,0]][0m
+PREPARE-LDR-COMB[ACCUM[1,0,0,#1,3,S[1,0]],BLOCK[0,1,#1,3,{TR[0,1,-]TR[0,5,-]TR[0,9,-]}],S[1,0]][49m[34m[0m[2]{0}pushing transaction:
+TR[0,31,-][0m
+[49m[31m[2]{0}callTEEprepareComb[0m
+[49m[31m[2]{0}just: 1[0m
+[49m[34m[2]{0}storing block for view=0:BLOCK[0,1,#1,3,{TR[0,1,-]TR[0,5,-]TR[0,9,-]}][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,35,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,35,-][0m
+[49m[34m[2]{0}sending:PREPARE-COMB[RDATA[#1,0,#1,0,PH_PREPARE],SIGNS[-1-:S[1,2]:]]->0;[0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,39,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,39,-][0m
+[49m[34m[2]{0}handling:PREPARE-COMB[RDATA[#1,0,#1,0,PH_PREPARE],SIGNS[-3-:S[1,0]:S[1,1]:S[1,2]:]][0m
+[49m[35m[2]{0}response to prepare[0m
+[49m[35m[2]{0}send pre-commit[0m
+[49m[31m[2]{0}callTEEstoreComb[0m
+[49m[35m[2]{0}TEEstoreComb just:JUST[1,RDATA[#1,0,#1,0,PH_PRECOMMIT],SIGNS[-1-:S[1,2]:]][0m
+[49m[35m[2]{0}leader:0[0m
+[49m[34m[2]{0}sending:PRECOMMIT-COMB[RDATA[#1,0,#1,0,PH_PRECOMMIT],SIGNS[-1-:S[1,2]:]]->0;[0m
+[49m[34m[2]{0}handling:PREPARE-COMB[RDATA[#1,0,#1,0,PH_PREPARE],SIGNS[-3-:S[1,0]:S[1,1]:S[1,2]:]][0m
+[49m[35m[2]{0}response to prepare[0m
+[49m[35m[2]{0}send pre-commit[0m
+[49m[31m[2]{0}callTEEstoreComb[0m
+[49m[35m[2]{0}TEEstoreComb just:JUST[1,RDATA[#1,0,#1,0,PH_COMMIT],SIGNS[-1-:S[1,2]:]][0m
+[49m[35m[2]{0}leader:0[0m
+[49m[34m[2]{0}sending:PRECOMMIT-COMB[RDATA[#1,0,#1,0,PH_COMMIT],SIGNS[-1-:S[1,2]:]]->0;[0m
+[49m[34m[2]{0}handling: pre-commit[0m
+[49m[34m[2]{0}handling:PRECOMMIT-COMB[RDATA[#1,0,#1,0,PH_PRECOMMIT],SIGNS[-3-:S[1,0]:S[1,1]:S[1,3]:]][0m
+[49m[31m[2]{0}callTEEstoreComb[0m
+fail: view mismatch
+[49m[35m[2]{0}TEEstoreComb just:JUST[0,RDATA[#0,0,#0,0,PH_NEWVIEW],SIGNS[-0-:]][0m
+[49m[34m[2]{0}sending:COMMIT-COMB[RDATA[#0,0,#0,0,PH_NEWVIEW],SIGNS[-0-:]]->0;[0m
+[49m[34m[2]{0}handling: pre-commit[0m
+[49m[34m[2]{0}handling:PRECOMMIT-COMB[RDATA[#1,0,#1,0,PH_COMMIT],SIGNS[-3-:S[1,0]:S[1,1]:S[1,3]:]][0m
+[49m[31m[2]{0}callTEEstoreComb[0m
+fail: view mismatch
+fail: phase invalid
+[49m[35m[2]{0}TEEstoreComb just:JUST[0,RDATA[#0,0,#0,0,PH_NEWVIEW],SIGNS[-0-:]][0m
+[49m[34m[2]{0}sending:COMMIT-COMB[RDATA[#0,0,#0,0,PH_NEWVIEW],SIGNS[-0-:]]->0;[0m
+[49m[34m[2]{0}handling: pre-commit[0m
+[49m[34m[2]{0}handling:PRECOMMIT-COMB[RDATA[#1,0,#1,0,PH_COMMIT],SIGNS[-3-:S[1,0]:S[1,1]:S[1,3]:]][0m
+[49m[31m[2]{0}callTEEstoreComb[0m
+[49m[34m[2]{0}handling:fail: view mismatch
+TRANSACTION[TR[0,43,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,43,-][0m
+fail: phase invalid
+[49m[35m[2]{0}TEEstoreComb just:JUST[0,RDATA[#0,0,#0,0,PH_NEWVIEW],SIGNS[-0-:]][0m
+[49m[34m[2]{0}sending:COMMIT-COMB[RDATA[#0,0,#0,0,PH_NEWVIEW],SIGNS[-0-:]]->0;[0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,47,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,47,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,51,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,51,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,55,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,55,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,59,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,59,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,63,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,63,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,67,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,67,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,71,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,71,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,75,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,75,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,79,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,79,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,83,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,83,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,87,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,87,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,91,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,91,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,95,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,95,-][0m
+[49m[34m[2]{0}handling:TRANSACTION[TR[0,99,-],S[0,0]][0m
+[49m[34m[2]{0}pushing transaction:TR[0,99,-][0m

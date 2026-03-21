@@ -66,6 +66,7 @@ opdist       = 0
 #
 numTrans      = 400    # number of transactions
 payloadSize   = 0 #256 #0 #256 #128      # total size of a transaction
+totalTEE      = 0
 useMultiCores = True
 numMakeCores  = multiprocessing.cpu_count()  # number of cores to use to make
 #
@@ -1456,7 +1457,7 @@ def mkApp(protocol,constFactor,numFaults,numTrans,payloadSize):
 # End of mkApp
 
 
-def execute(protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFaults,numDeadNodes,instance):
+def execute(protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFaults,numDeadNodes,instance,totalTEE):
     subsReps    = [] # list of replica subprocesses
     subsClients = [] # list of client subprocesses
     numReps = (constFactor * numFaults) + 1
@@ -1490,8 +1491,10 @@ def execute(protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFa
         # we give some time for the nodes to connect gradually
         if (i%10 == 5):
             time.sleep(2)
-        nodetype = "TEE"
-        cmd = " ".join([server, str(i), nodetype, str(numFaults), str(constFactor), str(numViews), str(newtimeout), str(opdist)])
+        # Set node type: first totalTEE nodes are TEE, rest are nonTEE
+        nodetype = "TEE" if i < totalTEE else "nonTEE"
+        # Parameter order must match Server.cpp: myid, nodeType, totaltee, numFaults, constFactor, numViews, timeout, opdist
+        cmd = " ".join([server, str(i), nodetype, str(totalTEE), str(numFaults), str(constFactor), str(numViews), str(newtimeout), str(opdist)])
         if runDocker:
             dockerInstance = dockerBase + str(i)
             if needsSGX(protocol):
@@ -1839,7 +1842,7 @@ def stopContainers(numReps,numClients):
 
 
 # if 'recompile' is true, the application will be recompiled (default=true)
-def computeAvgStats(recompile,protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFaults,numDeadNodes,numRepeats):
+def computeAvgStats(recompile,protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFaults,numDeadNodes,numRepeats, totaltee):
     print("<<<<<<<<<<<<<<<<<<<<",
           "protocol="+protocol.value,
           ";regions="+regions[0],
@@ -1858,7 +1861,7 @@ def computeAvgStats(recompile,protocol,constFactor,numClTrans,sleepTime,numViews
     cryptoNumVerifs=[]
 
     numReps = (constFactor * numFaults) + 1
-
+    
     if runDocker:
         startContainers(numReps,numClients)
 
@@ -1880,7 +1883,7 @@ def computeAvgStats(recompile,protocol,constFactor,numClTrans,sleepTime,numViews
               "[complete-runs="+str(completeRuns),"aborted-runs="+str(abortedRuns)+"]")
         print("aborted runs so far:", aborted)
         clearStatsDir()
-        execute(protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFaults,numDeadNodes,i)
+        execute(protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFaults,numDeadNodes,i,totaltee)
         (throughputView,latencyView,handle,cryptoSign,cryptoVerif,cryptoNumSign,cryptoNumVerif) = computeStats(protocol,numFaults,numDeadNodes,i,numRepeats)
         if throughputView > 0 and latencyView > 0 and handle > 0 and cryptoSign > 0 and cryptoVerif > 0 and cryptoNumSign > 0 and cryptoNumVerif > 0:
             throughputViews.append(throughputView)
@@ -2084,1826 +2087,105 @@ def updateDictionaries(protVal,numFaults,numDeads,pointVal,dBase,dCheap,dQuick,d
         dChComb.update({key:(val,num+1)})
 
 
-# def createPlot(pFile):
-#     # throughput-view
-#     dictTVBase   = {}
-#     dictTVCheap  = {}
-#     dictTVQuick  = {}
-#     dictTVComb   = {}
-#     dictTVFree   = {}
-#     dictTVOnep   = {}
-#     dictTVOnepB  = {}
-#     dictTVOnepC  = {}
-#     dictTVOnepD  = {}
-#     dictTVChBase = {}
-#     dictTVChComb = {}
-#     # latency-view
-#     dictLVBase   = {}
-#     dictLVCheap  = {}
-#     dictLVQuick  = {}
-#     dictLVComb   = {}
-#     dictLVFree   = {}
-#     dictLVOnep   = {}
-#     dictLVOnepB  = {}
-#     dictLVOnepC  = {}
-#     dictLVOnepD  = {}
-#     dictLVChBase = {}
-#     dictLVChComb = {}
-#     # handle
-#     dictHBase   = {}
-#     dictHCheap  = {}
-#     dictHQuick  = {}
-#     dictHComb   = {}
-#     dictHFree   = {}
-#     dictHOnep   = {}
-#     dictHOnepB  = {}
-#     dictHOnepC  = {}
-#     dictHOnepD  = {}
-#     dictHChBase = {}
-#     dictHChComb = {}
-#     # timeouts
-#     dictTOBase   = {}
-#     dictTOCheap  = {}
-#     dictTOQuick  = {}
-#     dictTOComb   = {}
-#     dictTOFree   = {}
-#     dictTOOnep   = {}
-#     dictTOOnepB  = {}
-#     dictTOOnepC  = {}
-#     dictTOOnepD  = {}
-#     dictTOChBase = {}
-#     dictTOChComb = {}
-#     # onepbs
-#     dictPBBase   = {}
-#     dictPBCheap  = {}
-#     dictPBQuick  = {}
-#     dictPBComb   = {}
-#     dictPBFree   = {}
-#     dictPBOnep   = {}
-#     dictPBOnepB  = {}
-#     dictPBOnepC  = {}
-#     dictPBOnepD  = {}
-#     dictPBChBase = {}
-#     dictPBChComb = {}
-#     # onepcs
-#     dictPCBase   = {}
-#     dictPCCheap  = {}
-#     dictPCQuick  = {}
-#     dictPCComb   = {}
-#     dictPCFree   = {}
-#     dictPCOnep   = {}
-#     dictPCOnepB  = {}
-#     dictPCOnepC  = {}
-#     dictPCOnepD  = {}
-#     dictPCChBase = {}
-#     dictPCChComb = {}
-#     # crypto-sign
-#     dictCSBase   = {}
-#     dictCSCheap  = {}
-#     dictCSQuick  = {}
-#     dictCSComb   = {}
-#     dictCSFree   = {}
-#     dictCSOnep   = {}
-#     dictCSOnepB  = {}
-#     dictCSOnepC  = {}
-#     dictCSOnepD  = {}
-#     dictCSChBase = {}
-#     dictCSChComb = {}
-#     # crypto-verif
-#     dictCVBase   = {}
-#     dictCVCheap  = {}
-#     dictCVQuick  = {}
-#     dictCVComb   = {}
-#     dictCVFree   = {}
-#     dictCVOnep   = {}
-#     dictCVOnepB  = {}
-#     dictCVOnepC  = {}
-#     dictCVOnepD  = {}
-#     dictCVChBase = {}
-#     dictCVChComb = {}
 
-#     global dockerCpu, dockerMem, networkLat, payloadSize, repeats, repeatsL2, numViews, rateMbit
 
-#     # We accumulate all the points in dictionaries
-#     print("reading points from:", pFile)
-#     f = open(pFile,'r')
-#     for line in f.readlines():
-#         if line.startswith("##params"):
-#             args = line.split(" ")
-#             cpu     = "cpus=0"
-#             mem     = "mem=0"
-#             lat     = "lat=0"
-#             rate    = "rate=0"
-#             payload = "payload=0"
-#             rep1    = "repeats1=0"
-#             rep2    = "repeats2=0"
-#             views   = "views=0"
-#             regs    = "regions=one"
-#             if len(args) == 9:
-#                 [hdr,cpu,mem,lat,payload,rep1,rep2,views,regs] = args
-#             elif len(args) == 10:
-#                 [hdr,cpu,mem,lat,rate,payload,rep1,rep2,views,regs] = args
-#             else:
-#                 print("WRONG ARGUMENTS in ##params comment")
-#             [cpuTag,cpuVal] = cpu.split("=")
-#             dockerCpu = float(cpuVal)
-#             [memTag,memVal] = mem.split("=")
-#             dockerMem = int(memVal)
-#             [latTag,latVal] = lat.split("=")
-#             networkLat = float(latVal)
-#             [rateTag,rateVal] = rate.split("=")
-#             rateMbit = float(rateVal)
-#             [payloadTag,payloadVal] = payload.split("=")
-#             payloadSize = int(payloadVal)
-#             [rep1Tag,rep1Val] = rep1.split("=")
-#             repeats = int(rep1Val)
-#             [rep2Tag,rep2Val] = rep2.split("=")
-#             repeatsL2 = int(rep2Val)
-#             [viewsTag,viewsVal] = views.split("=")
-#             numViews = int(viewsVal)
-#             [regsTag,regsVal] = regs.split("=")
-#             setRegion(regsVal)
+# ## Run experiments so that all protocols use the same number of nodes, and we vary the number of faults
+# ## numFaults is used as the basis to compute the actual number of faults: 2* or 3* depending on the protocol
+# def runExperimentsFaults(numFaults):
+#     # Creating stats directory
+#     Path(statsdir).mkdir(parents=True, exist_ok=True)
 
-#         if line.startswith("protocol"):
-#             l = line.split(" ")
-#             prot   = "protocol=BASIC_BASELINE"
-#             faults = "faults=1"
-#             deads  = "deads=0"
-#             point  = "throughput-view=0.0"
-#             if len(l) == 3:
-#                 [prot,faults,point] = l
-#             elif len(l) == 4:
-#                 [prot,faults,deads,point] = l
-#             else:
-#                 print("WRONG ARGUMENTS in point line: " + line)
-#             [protTag,protVal]     = prot.split("=")
-#             [faultsTag,faultsVal] = faults.split("=")
-#             [deadsTag,deadsVal]   = deads.split("=")
-#             [pointTag,pointVal]   = point.split("=")
-#             numFaults=int(faultsVal)
-#             numDeads=int(deadsVal)
-#             if float(pointVal) < float('inf'):
-#                 # Throughputs-view
-#                 if pointTag == "throughput-view":
-#                     updateDictionaries(protVal,numFaults,numDeads,pointVal,dictTVBase,dictTVCheap,dictTVQuick,dictTVComb,dictTVFree,dictTVOnep,dictTVOnepB,dictTVOnepC,dictTVOnepD,dictTVChBase,dictTVChComb)
-#                 # Latencies-view
-#                 if pointTag == "latency-view":
-#                     updateDictionaries(protVal,numFaults,numDeads,pointVal,dictLVBase,dictLVCheap,dictLVQuick,dictLVComb,dictLVFree,dictLVOnep,dictLVOnepB,dictLVOnepC,dictLVOnepD,dictLVChBase,dictLVChComb)
-#                 # handle
-#                 if (pointTag == "handle" or pointTag == "latency-handle"):
-#                     updateDictionaries(protVal,numFaults,numDeads,pointVal,dictHBase,dictHCheap,dictHQuick,dictHComb,dictHFree,dictHOnep,dictHOnepB,dictHOnepC,dictHOnepD,dictHChBase,dictHChComb)
-#                 # timeouts
-#                 if pointTag == "timeouts":
-#                     updateDictionaries(protVal,numFaults,numDeads,pointVal,dictTOBase,dictTOCheap,dictTOQuick,dictTOComb,dictTOFree,dictTOOnep,dictTOOnepB,dictTOOnepC,dictTOOnepD,dictTOChBase,dictTOChComb)
-#                 # onepbs
-#                 if pointTag == "onepbs":
-#                     updateDictionaries(protVal,numFaults,numDeads,pointVal,dictPBBase,dictPBCheap,dictPBQuick,dictPBComb,dictPBFree,dictPBOnep,dictPBOnepB,dictPBOnepC,dictPBOnepD,dictPBChBase,dictPBChComb)
-#                 # onepcs
-#                 if pointTag == "onepcs":
-#                     updateDictionaries(protVal,numFaults,numDeads,pointVal,dictPCBase,dictPCCheap,dictPCQuick,dictPCComb,dictPCFree,dictPCOnep,dictPCOnepB,dictPCOnepC,dictPCOnepD,dictPCChBase,dictPCChComb)
-#                 # crypto-sign
-#                 if pointTag == "crypto-sign":
-#                     updateDictionaries(protVal,numFaults,numDeads,pointVal,dictCSBase,dictCSCheap,dictCSQuick,dictCSComb,dictCSFree,dictCSOnep,dictCSOnepB,dictCSOnepC,dictCSOnepD,dictCSChBase,dictCSChComb)
-#                 # crypto-verif
-#                 if pointTag == "crypto-verif":
-#                     updateDictionaries(protVal,numFaults,numDeads,pointVal,dictCVBase,dictCVCheap,dictCVQuick,dictCVComb,dictCVFree,dictCVOnep,dictCVOnepB,dictCVOnepC,dictCVOnepD,dictCVChBase,dictCVChComb)
-#     f.close()
+#     printNodePointParams()
 
-#     quantileSize = 20
-#     quantileSize1 = 20
-#     quantileSize2 = 20
+#     l = range(2*numFaults+1)
+#     print("will test the following numbers of dead nodes: ", l)
 
-#     # We convert the dictionaries to lists
-#     # throughput-view
-#     (faultsTVBase,   valsTVBase,   numsTVBase)   = dict2lists(dictTVBase,quantileSize,False)
-#     (faultsTVCheap,  valsTVCheap,  numsTVCheap)  = dict2lists(dictTVCheap,quantileSize,False)
-#     (faultsTVQuick,  valsTVQuick,  numsTVQuick)  = dict2lists(dictTVQuick,quantileSize,False)
-#     (faultsTVComb,   valsTVComb,   numsTVComb)   = dict2lists(dictTVComb,quantileSize,False)
-#     (faultsTVFree,   valsTVFree,   numsTVFree)   = dict2lists(dictTVFree,quantileSize,False)
-#     (faultsTVOnep,   valsTVOnep,   numsTVOnep)   = dict2lists(dictTVOnep,quantileSize,False)
-#     (faultsTVOnepB,  valsTVOnepB,  numsTVOnepB)  = dict2lists(dictTVOnepB,quantileSize,False)
-#     (faultsTVOnepC,  valsTVOnepC,  numsTVOnepC)  = dict2lists(dictTVOnepC,quantileSize,False)
-#     (faultsTVOnepD,  valsTVOnepD,  numsTVOnepD)  = dict2lists(dictTVOnepD,quantileSize,False)
-#     (faultsTVChBase, valsTVChBase, numsTVChBase) = dict2lists(dictTVChBase,quantileSize,False)
-#     (faultsTVChComb, valsTVChComb, numsTVChComb) = dict2lists(dictTVChComb,quantileSize,False)
-#     # latency-view
-#     (faultsLVBase,   valsLVBase,   numsLVBase)   = dict2lists(dictLVBase,quantileSize,False)
-#     (faultsLVCheap,  valsLVCheap,  numsLVCheap)  = dict2lists(dictLVCheap,quantileSize,False)
-#     (faultsLVQuick,  valsLVQuick,  numsLVQuick)  = dict2lists(dictLVQuick,quantileSize,False)
-#     (faultsLVComb,   valsLVComb,   numsLVComb)   = dict2lists(dictLVComb,quantileSize,False)
-#     (faultsLVFree,   valsLVFree,   numsLVFree)   = dict2lists(dictLVFree,quantileSize,False)
-#     (faultsLVOnep,   valsLVOnep,   numsLVOnep)   = dict2lists(dictLVOnep,quantileSize,False)
-#     (faultsLVOnepB,  valsLVOnepB,  numsLVOnepB)  = dict2lists(dictLVOnepB,quantileSize,False)
-#     (faultsLVOnepC,  valsLVOnepC,  numsLVOnepC)  = dict2lists(dictLVOnepC,quantileSize,False)
-#     (faultsLVOnepD,  valsLVOnepD,  numsLVOnepD)  = dict2lists(dictLVOnepD,quantileSize,False)
-#     (faultsLVChBase, valsLVChBase, numsLVChBase) = dict2lists(dictLVChBase,quantileSize,False)
-#     (faultsLVChComb, valsLVChComb, numsLVChComb) = dict2lists(dictLVChComb,quantileSize,False)
-#     # handle
-#     (faultsHBase,   valsHBase,   numsHBase)   = dict2lists(dictHBase,quantileSize1,False)
-#     (faultsHCheap,  valsHCheap,  numsHCheap)  = dict2lists(dictHCheap,quantileSize1,False)
-#     (faultsHQuick,  valsHQuick,  numsHQuick)  = dict2lists(dictHQuick,quantileSize1,False)
-#     (faultsHComb,   valsHComb,   numsHComb)   = dict2lists(dictHComb,quantileSize1,False)
-#     (faultsHFree,   valsHFree,   numsHFree)   = dict2lists(dictHFree,quantileSize1,False)
-#     (faultsHOnep,   valsHOnep,   numsHOnep)   = dict2lists(dictHOnep,quantileSize1,False)
-#     (faultsHOnepB,  valsHOnepB,  numsHOnepB)  = dict2lists(dictHOnepB,quantileSize1,False)
-#     (faultsHOnepC,  valsHOnepC,  numsHOnepC)  = dict2lists(dictHOnepC,quantileSize1,False)
-#     (faultsHOnepD,  valsHOnepD,  numsHOnepD)  = dict2lists(dictHOnepD,quantileSize1,False)
-#     (faultsHChBase, valsHChBase, numsHChBase) = dict2lists(dictHChBase,quantileSize1,False)
-#     (faultsHChComb, valsHChComb, numsHChComb) = dict2lists(dictHChComb,quantileSize1,False)
-#     # timeouts
-#     (faultsTOBase,   valsTOBase,   numsTOBase)   = dict2lists(dictTOBase,0,False)
-#     (faultsTOCheap,  valsTOCheap,  numsTOCheap)  = dict2lists(dictTOCheap,0,False)
-#     (faultsTOQuick,  valsTOQuick,  numsTOQuick)  = dict2lists(dictTOQuick,0,False)
-#     (faultsTOComb,   valsTOComb,   numsTOComb)   = dict2lists(dictTOComb,0,False)
-#     (faultsTOFree,   valsTOFree,   numsTOFree)   = dict2lists(dictTOFree,0,False)
-#     (faultsTOOnep,   valsTOOnep,   numsTOOnep)   = dict2lists(dictTOOnep,0,False)
-#     (faultsTOOnepB,  valsTOOnepB,  numsTOOnepB)  = dict2lists(dictTOOnepB,0,False)
-#     (faultsTOOnepC,  valsTOOnepC,  numsTOOnepC)  = dict2lists(dictTOOnepC,0,False)
-#     (faultsTOOnepD,  valsTOOnepD,  numsTOOnepD)  = dict2lists(dictTOOnepD,0,False)
-#     (faultsTOChBase, valsTOChBase, numsTOChBase) = dict2lists(dictTOChBase,0,False)
-#     (faultsTOChComb, valsTOChComb, numsTOChComb) = dict2lists(dictTOChComb,0,False)
-#     # onepbs
-#     (faultsPBBase,   valsPBBase,   numsPBBase)   = dict2lists(dictPBBase,0,False)
-#     (faultsPBCheap,  valsPBCheap,  numsPBCheap)  = dict2lists(dictPBCheap,0,False)
-#     (faultsPBQuick,  valsPBQuick,  numsPBQuick)  = dict2lists(dictPBQuick,0,False)
-#     (faultsPBComb,   valsPBComb,   numsPBComb)   = dict2lists(dictPBComb,0,False)
-#     (faultsPBFree,   valsPBFree,   numsPBFree)   = dict2lists(dictPBFree,0,False)
-#     (faultsPBOnep,   valsPBOnep,   numsPBOnep)   = dict2lists(dictPBOnep,0,False)
-#     (faultsPBOnepB,  valsPBOnepB,  numsPBOnepB)  = dict2lists(dictPBOnepB,0,False)
-#     (faultsPBOnepC,  valsPBOnepC,  numsPBOnepC)  = dict2lists(dictPBOnepC,0,False)
-#     (faultsPBOnepD,  valsPBOnepD,  numsPBOnepD)  = dict2lists(dictPBOnepD,0,False)
-#     (faultsPBChBase, valsPBChBase, numsPBChBase) = dict2lists(dictPBChBase,0,False)
-#     (faultsPBChComb, valsPBChComb, numsPBChComb) = dict2lists(dictPBChComb,0,False)
-#     # onepcs
-#     (faultsPCBase,   valsPCBase,   numsPCBase)   = dict2lists(dictPCBase,0,False)
-#     (faultsPCCheap,  valsPCCheap,  numsPCCheap)  = dict2lists(dictPCCheap,0,False)
-#     (faultsPCQuick,  valsPCQuick,  numsPCQuick)  = dict2lists(dictPCQuick,0,False)
-#     (faultsPCComb,   valsPCComb,   numsPCComb)   = dict2lists(dictPCComb,0,False)
-#     (faultsPCFree,   valsPCFree,   numsPCFree)   = dict2lists(dictPCFree,0,False)
-#     (faultsPCOnep,   valsPCOnep,   numsPCOnep)   = dict2lists(dictPCOnep,0,False)
-#     (faultsPCOnepB,  valsPCOnepB,  numsPCOnepB)  = dict2lists(dictPCOnepB,0,False)
-#     (faultsPCOnepC,  valsPCOnepC,  numsPCOnepC)  = dict2lists(dictPCOnepC,0,False)
-#     (faultsPCOnepD,  valsPCOnepD,  numsPCOnepD)  = dict2lists(dictPCOnepD,0,False)
-#     (faultsPCChBase, valsPCChBase, numsPCChBase) = dict2lists(dictPCChBase,0,False)
-#     (faultsPCChComb, valsPCChComb, numsPCChComb) = dict2lists(dictPCChComb,0,False)
-#     # crypto-sign
-#     (faultsCSBase,   valsCSBase,   numsCSBase)   = dict2lists(dictCSBase,quantileSize2,False)
-#     (faultsCSCheap,  valsCSCheap,  numsCSCheap)  = dict2lists(dictCSCheap,quantileSize2,False)
-#     (faultsCSQuick,  valsCSQuick,  numsCSQuick)  = dict2lists(dictCSQuick,quantileSize2,False)
-#     (faultsCSComb,   valsCSComb,   numsCSComb)   = dict2lists(dictCSComb,quantileSize2,False)
-#     (faultsCSFree,   valsCSFree,   numsCSFree)   = dict2lists(dictCSFree,quantileSize2,False)
-#     (faultsCSOnep,   valsCSOnep,   numsCSOnep)   = dict2lists(dictCSOnep,quantileSize2,False)
-#     (faultsCSOnepB,  valsCSOnepB,  numsCSOnepB)  = dict2lists(dictCSOnepB,quantileSize2,False)
-#     (faultsCSOnepC,  valsCSOnepC,  numsCSOnepC)  = dict2lists(dictCSOnepC,quantileSize2,False)
-#     (faultsCSOnepD,  valsCSOnepD,  numsCSOnepD)  = dict2lists(dictCSOnepD,quantileSize2,False)
-#     (faultsCSChBase, valsCSChBase, numsCSChBase) = dict2lists(dictCSChBase,quantileSize2,False)
-#     (faultsCSChComb, valsCSChComb, numsCSChComb) = dict2lists(dictCSChComb,quantileSize2,False)
-#     # crypto-verif
-#     (faultsCVBase,   valsCVBase,   numsCVBase)   = dict2lists(dictCVBase,quantileSize2,False)
-#     (faultsCVCheap,  valsCVCheap,  numsCVCheap)  = dict2lists(dictCVCheap,quantileSize2,False)
-#     (faultsCVQuick,  valsCVQuick,  numsCVQuick)  = dict2lists(dictCVQuick,quantileSize2,False)
-#     (faultsCVComb,   valsCVComb,   numsCVComb)   = dict2lists(dictCVComb,quantileSize2,False)
-#     (faultsCVFree,   valsCVFree,   numsCVFree)   = dict2lists(dictCVFree,quantileSize2,False)
-#     (faultsCVOnep,   valsCVOnep,   numsCVOnep)   = dict2lists(dictCVOnep,quantileSize2,False)
-#     (faultsCVOnepB,  valsCVOnepB,  numsCVOnepB)  = dict2lists(dictCVOnepB,quantileSize2,False)
-#     (faultsCVOnepC,  valsCVOnepC,  numsCVOnepC)  = dict2lists(dictCVOnepC,quantileSize2,False)
-#     (faultsCVOnepD,  valsCVOnepD,  numsCVOnepD)  = dict2lists(dictCVOnepD,quantileSize2,False)
-#     (faultsCVChBase, valsCVChBase, numsCVChBase) = dict2lists(dictCVChBase,quantileSize2,False)
-#     (faultsCVChComb, valsCVChComb, numsCVChComb) = dict2lists(dictCVChComb,quantileSize2,False)
-
-#     print("== faults/throughputs(val+num)/latencies(val+num)/cypto-verif(val+num)/cypto-sign(val+num)")
-#     if len(faultsTVBase):
-#         print("base",   (faultsTVBase,   (valsTVBase,   numsTVBase),   (valsLVBase,   numsLVBase),   (valsCVBase,   numsCVBase),   (valsCSBase,   numsCSBase),    (valsTOBase,   numsTOBase)))
-#     if len(faultsTVCheap):
-#         print("cheap",  (faultsTVCheap,  (valsTVCheap,  numsTVCheap),  (valsLVCheap,  numsLVCheap),  (valsCVCheap,  numsCVCheap),  (valsCSCheap,  numsCSCheap),   (valsTOCheap,  numsTOCheap)))
-#     if len(faultsTVQuick):
-#         print("quick",  (faultsTVQuick,  (valsTVQuick,  numsTVQuick),  (valsLVQuick,  numsLVQuick),  (valsCVQuick,  numsCVQuick),  (valsCSQuick,  numsCSQuick),   (valsTOQuick,  numsTOQuick)))
-#     if len(faultsTVComb):
-#         print("comb",   (faultsTVComb,   (valsTVComb,   numsTVComb),   (valsLVComb,   numsLVComb),   (valsCVComb,   numsCVComb),   (valsCSComb,   numsCSComb),    (valsTOComb,   numsTOComb)))
-#     if len(faultsTVFree):
-#         print("free",   (faultsTVFree,   (valsTVFree,   numsTVFree),   (valsLVFree,   numsLVFree),   (valsCVFree,   numsCVFree),   (valsCSFree,   numsCSFree),    (valsTOFree,   numsTOFree)))
-#     if len(faultsTVOnep):
-#         print("onep",   (faultsTVOnep,   (valsTVOnep,   numsTVOnep),   (valsLVOnep,   numsLVOnep),   (valsCVOnep,   numsCVOnep),   (valsCSOnep,   numsCSOnep),    (valsTOOnep,   numsTOOnep), (valsPBOnep, numsPBOnep), (valsPCOnep, numsPCOnep)))
-#     if len(faultsTVOnepB):
-#         print("onepb",  (faultsTVOnepB,  (valsTVOnepB,  numsTVOnepB),  (valsLVOnepB,  numsLVOnepB),  (valsCVOnepB,  numsCVOnepB),  (valsCSOnepB,  numsCSOnepB),   (valsTOOnepB,  numsTOOnepB)))
-#     if len(faultsTVOnepC):
-#         print("onepc",  (faultsTVOnepC,  (valsTVOnepC,  numsTVOnepC),  (valsLVOnepC,  numsLVOnepC),  (valsCVOnepC,  numsCVOnepC),  (valsCSOnepC,  numsCSOnepC),   (valsTOOnepC,  numsTOOnepC)))
-#     if len(faultsTVOnepD):
-#         print("onepd",  (faultsTVOnepD,  (valsTVOnepD,  numsTVOnepD),  (valsLVOnepD,  numsLVOnepD),  (valsCVOnepD,  numsCVOnepD),  (valsCSOnepD,  numsCSOnepD),   (valsTOOnepD,  numsTOOnepD)))
-#     if len(faultsTVChBase):
-#         print("chbase", (faultsTVChBase, (valsTVChBase, numsTVChBase), (valsLVChBase, numsLVChBase), (valsCVChBase, numsCVChBase), (valsCSChBase, numsCSChBase),  (valsTOChBase, numsTOChBase)))
-#     if len(faultsTVChComb):
-#         print("chcomb", (faultsTVChComb, (valsTVChComb, numsTVChComb), (valsLVChComb, numsLVChComb), (valsCVChComb, numsCVChComb), (valsCSChComb, numsCSChComb),  (valsTOChComb, numsTOChComb)))
-
-#     print("== faults/throughputs(val)/latencies(val)")
-#     if len(faultsTVBase):
-#         print("base",   faultsTVBase,   valsTVBase,   valsLVBase)
-#     if len(faultsTVCheap):
-#         print("cheap",  faultsTVCheap,  valsTVCheap,  valsLVCheap)
-#     if len(faultsTVQuick):
-#         print("quick",  faultsTVQuick,  valsTVQuick,  valsLVQuick)
-#     if len(faultsTVComb):
-#         print("comb",   faultsTVComb,   valsTVComb,   valsLVComb)
-#     if len(faultsTVFree):
-#         print("free",   faultsTVFree,   valsTVFree,   valsLVFree)
-#     if len(faultsTVOnep):
-#         print("onep",   faultsTVOnep,   valsTVOnep,   valsLVOnep)
-#     if len(faultsTVOnepB):
-#         print("onepb",  faultsTVOnepB,  valsTVOnepB,  valsLVOnepB)
-#     if len(faultsTVOnepC):
-#         print("onepc",  faultsTVOnepC,  valsTVOnepC,  valsLVOnepC)
-#     if len(faultsTVOnepD):
-#         print("onepd",  faultsTVOnepD,  valsTVOnepD,  valsLVOnepD)
-#     if len(faultsTVChBase):
-#         print("chbase", faultsTVChBase, valsTVChBase, valsLVChBase)
-#     if len(faultsTVChComb):
-#         print("chcomb", faultsTVChComb, valsTVChComb, valsLVChComb)
-
-#     print("== Throughput gain (basic versions):")
-#     # non-chained
-#     if len(faultsTVCheap):
-#         getPercentage(False,baseHS,faultsTVBase,valsTVBase,cheapHS,faultsTVCheap,valsTVCheap)
-#     if len(faultsTVQuick):
-#         getPercentage(False,baseHS,faultsTVBase,valsTVBase,quickHS,faultsTVQuick,valsTVQuick)
-#     if len(faultsTVComb):
-#         getPercentage(False,baseHS,faultsTVBase,valsTVBase,combHS, faultsTVComb, valsTVComb)
-#     if len(faultsTVFree):
-#         getPercentage(False,baseHS,faultsTVBase,valsTVBase,freeHS, faultsTVFree, valsTVFree)
-#     if len(faultsTVFree):
-#         getPercentage(False,combHS,faultsTVComb,valsTVComb,freeHS, faultsTVFree, valsTVFree)
-#     if len(faultsTVOnep):
-#         getPercentage(False,baseHS,faultsTVBase,valsTVBase,onepHS, faultsTVOnep, valsTVOnep)
-#     if len(faultsTVOnep):
-#         getPercentage(False,combHS,faultsTVComb,valsTVComb,onepHS, faultsTVOnep, valsTVOnep)
-#     # chained
-#     if len(faultsTVChComb):
-#         getPercentage(False,baseChHS,faultsTVChBase,valsTVChBase,combChHS,faultsTVChComb,valsTVChComb)
-
-#     print("== Latency gain (basic versions):")
-#     # non-chained
-#     if len(faultsLVCheap):
-#         getPercentage(True,baseHS,faultsLVBase,valsLVBase,cheapHS,faultsLVCheap,valsLVCheap)
-#     if len(faultsLVQuick):
-#         getPercentage(True,baseHS,faultsLVBase,valsLVBase,quickHS,faultsLVQuick,valsLVQuick)
-#     if len(faultsLVComb):
-#         getPercentage(True,baseHS,faultsLVBase,valsLVBase,combHS, faultsLVComb, valsLVComb)
-#     if len(faultsLVFree):
-#         getPercentage(True,baseHS,faultsLVBase,valsLVBase,freeHS, faultsLVFree, valsLVFree)
-#     if len(faultsLVFree):
-#         getPercentage(True,combHS,faultsLVComb,valsLVComb,freeHS, faultsLVFree, valsLVFree)
-#     if len(faultsLVOnep):
-#         getPercentage(True,baseHS,faultsLVBase,valsLVBase,onepHS, faultsLVOnep, valsLVOnep)
-#     if len(faultsLVOnep):
-#         getPercentage(True,combHS,faultsLVComb,valsLVComb,onepHS, faultsLVOnep, valsLVOnep)
-#     # chained
-#     if len(faultsLVChComb):
-#         getPercentage(True,baseChHS,faultsLVChBase,valsLVChBase,combChHS,faultsLVChComb,valsLVChComb)
-
-#     print("== Handle gain (basic versions):")
-#     # non-chained
-#     if len(faultsHCheap):
-#         getPercentage(True,baseHS,faultsHBase,valsHBase,cheapHS,faultsHCheap,valsHCheap)
-#     if len(faultsHQuick):
-#         getPercentage(True,baseHS,faultsHBase,valsHBase,quickHS,faultsHQuick,valsHQuick)
-#     if len(faultsHComb):
-#         getPercentage(True,baseHS,faultsHBase,valsHBase,combHS, faultsHComb, valsHComb)
-#     if len(faultsHFree):
-#         getPercentage(True,baseHS,faultsHBase,valsHBase,freeHS, faultsHFree, valsHFree)
-#     if len(faultsHFree):
-#         getPercentage(True,combHS,faultsHComb,valsHComb,freeHS, faultsHFree, valsHFree)
-#     if len(faultsHOnep):
-#         getPercentage(True,baseHS,faultsHBase,valsHBase,onepHS, faultsHOnep, valsHOnep)
-#     if len(faultsHOnep):
-#         getPercentage(True,combHS,faultsHComb,valsHComb,onepHS, faultsHOnep, valsHOnep)
-#     # chained
-#     if len(faultsHChComb):
-#         getPercentage(True,baseChHS,faultsHChBase,valsHChBase,combChHS,faultsHChComb,valsHChComb)
-
-#     LW = 1 # linewidth
-#     MS = 5 # markersize
-#     XYT = (0,5)
-
-#     #plt.figure(figsize=(2, 6))
-#     #, dpi=80)
-
-#     global plotThroughput
-#     global plotLatency
-
-#     if (plotHandle or plotCrypto) and not plotView:
-#         plotThroughput = False
-#         plotLatency    = True
-
-#     numPlots=2
-#     if (plotThroughput and not plotLatency) or (not plotThroughput and plotLatency):
-#         numPlots=1
-
-#     ## Plotting
-#     print("plotting",numPlots,"plot(s)")
-#     fig, axs = plt.subplots(numPlots,1)
-#     if numPlots == 1:
-#         x = axs
-#         axs = [x]
-#     #,figsize=(4, 10)
-#     if showTitle:
-#         if debugPlot:
-#             info = "file="+pFile
-#             info += "; cpus="+str(dockerCpu)
-#             info += "; mem="+str(dockerMem)
-#             info += "; lat="+str(networkLat)
-#             info += "; payload="+str(payloadSize)
-#             info += "; repeats1="+str(repeats)
-#             info += "; repeats2="+str(repeatsL2)
-#             info += "; #views="+str(numViews)
-#             info += "; regions="+regions[0]
-#             if plotHandle and not plotView:
-#                 fig.suptitle("Handling time\n("+info+")")
-#             else:
-#                 fig.suptitle("Throughputs (top) & Latencies (bottom)\n("+info+")")
+#     for numDeadNodes in l: # i.e., from 0 to numFaults
+#         # ------
+#         # HotStuff-like baseline
+#         if runBase:
+#             computeAvgStats(recompile,protocol=Protocol.BASE,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=2*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
 #         else:
-#             if plotHandle and not plotView:
-#                 fig.suptitle("Handling time")
-#             else:
-#                 fig.suptitle("Throughputs (top) & Latencies (bottom)")
-
-#     adjustFigAspect(fig,aspect=0.9)
-#     #adjustFigAspect(fig,aspect=0.9)
-#     if numPlots == 2:
-#         fig.set_figheight(6)
-#     else: # == 1
-#         fig.set_figheight(3)
-#     #fig.set_figwidth(4)
-
-#     if plotThroughput:
-#         # naming the x/y axis
-#         #axs[0].set(xlabel="#faults", ylabel="throughput")
-#         if showYlabel:
-#             axs[0].set(ylabel="throughput (Kops/s)")
-#         if logScale:
-#             axs[0].set_yscale('log')
-#         if whichExp == "EUexp1":
-#             axs[0].set_yticks((0.5,1,10,20,70))
-#             axs[0].set_ylim([0.5,70])
-#             axs[0].get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-#         elif whichExp == "ALLexp1":
-#             axs[0].set_yticks((0.3,1,6))
-#             axs[0].set_ylim([0.3,6])
-#             axs[0].get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-#         # giving a title to my graph
-#         #axs[0].set_title("throughputs")
-#         # plotting the points
-#         if plotView:
-#             if plotBasic:
-#                 if len(faultsTVBase) > 0:
-#                     axs[0].plot(faultsTVBase,   valsTVBase,   color=baseCOL,   linewidth=LW, marker=baseMRK,   markersize=MS, linestyle=baseLS,   label=baseHS)
-#                 if len(faultsTVCheap) > 0:
-#                     axs[0].plot(faultsTVCheap,  valsTVCheap,  color=cheapCOL,  linewidth=LW, marker=cheapMRK,  markersize=MS, linestyle=cheapLS,  label=cheapHS)
-#                 if len(faultsTVQuick) > 0:
-#                     axs[0].plot(faultsTVQuick,  valsTVQuick,  color=quickCOL,  linewidth=LW, marker=quickMRK,  markersize=MS, linestyle=quickLS,  label=quickHS)
-#                 if len(faultsTVComb) > 0:
-#                     axs[0].plot(faultsTVComb,   valsTVComb,   color=combCOL,   linewidth=LW, marker=combMRK,   markersize=MS, linestyle=combLS,   label=combHS)
-#                 if len(faultsTVFree) > 0:
-#                     axs[0].plot(faultsTVFree,   valsTVFree,   color=freeCOL,   linewidth=LW, marker=freeMRK,   markersize=MS, linestyle=freeLS,   label=freeHS)
-#                 if len(faultsTVOnep) > 0:
-#                     axs[0].plot(faultsTVOnep,   valsTVOnep,   color=onepCOL,   linewidth=LW, marker=onepMRK,   markersize=MS, linestyle=onepLS,   label=onepHS)
-#                 if len(faultsTVOnepB) > 0:
-#                     axs[0].plot(faultsTVOnepB,  valsTVOnepB,  color=onepbCOL,  linewidth=LW, marker=onepbMRK,  markersize=MS, linestyle=onepbLS,  label=onepbHS)
-#                 if len(faultsTVOnepC) > 0:
-#                     axs[0].plot(faultsTVOnepC,  valsTVOnepC,  color=onepcCOL,  linewidth=LW, marker=onepcMRK,  markersize=MS, linestyle=onepcLS,  label=onepcHS)
-#                 if len(faultsTVOnepD) > 0:
-#                     axs[0].plot(faultsTVOnepD,  valsTVOnepD,  color=onepdCOL,  linewidth=LW, marker=onepdMRK,  markersize=MS, linestyle=onepdLS,  label=onepdHS)
-#             if plotChained:
-#                 if len(faultsTVChBase) > 0:
-#                     axs[0].plot(faultsTVChBase, valsTVChBase, color=baseChCOL, linewidth=LW, marker=baseChMRK, markersize=MS, linestyle=baseChLS, label=baseChHS)
-#                 if len(faultsTVChComb) > 0:
-#                     axs[0].plot(faultsTVChComb, valsTVChComb, color=combChCOL, linewidth=LW, marker=combChMRK, markersize=MS, linestyle=combChLS, label=combChHS)
-#             if debugPlot:
-#                 if plotBasic:
-#                     for x,y,z in zip(faultsTVBase, valsTVBase, numsTVBase):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVCheap, valsTVCheap, numsTVCheap):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVQuick, valsTVQuick, numsTVQuick):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVComb, valsTVComb, numsTVComb):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVFree, valsTVFree, numsTVFree):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVOnep, valsTVOnep, numsTVOnep):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVOnepB, valsTVOnepB, numsTVOnepB):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVOnepC, valsTVOnepC, numsTVOnepC):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVOnepD, valsTVOnepD, numsTVOnepD):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                 if plotChained:
-#                     for x,y,z in zip(faultsTVChBase, valsTVChBase, numsTVChBase):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsTVChComb, valsTVChComb, numsTVChComb):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-
-#         # legend
-#         if showLegend1:
-#             axs[0].legend(ncol=2,prop={'size': 9})
-
-#     if plotLatency:
-#         ax=axs[0]
-#         if plotThroughput:
-#             ax=axs[1]
-#         # naming the x/y axis
-#         if showYlabel:
-#             if plotHandle and not plotView:
-#                 if deadNodes:
-#                     ax.set(xlabel="#nodes", ylabel="handling time (ms)")
-#                 else:
-#                     ax.set(xlabel="#faults", ylabel="handling time (ms)")
-#             else:
-#                 if deadNodes:
-#                     ax.set(xlabel="#nodes", ylabel="latency (ms)")
-#                 else:
-#                     ax.set(xlabel="#faults", ylabel="latency (ms)")
+#             pass
+#         # ------
+#         # Cheap-HotStuff (TEE locked/prepared blocks)
+#         if runCheap:
+#             computeAvgStats(recompile,protocol=Protocol.CHEAP,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
 #         else:
-#             ax.set(xlabel="#faults")
-#         if logScale:
-#             ax.set_yscale('log')
-#         if whichExp == "EUexp1":
-#             ax.set_yticks((5,100,600))
-#             ax.set_ylim([5,600])
-#             ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-#         elif whichExp == "ALLexp1":
-#             ax.set_yticks((60,100,1000))
-#             ax.set_ylim([60,1000])
-#             ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-#         # giving a title to my graph
-#         #ax.set_title("latencies")
-#         # plotting the points
-#         if plotView:
-#             if plotBasic:
-#                 if len(faultsLVBase) > 0: #and not runBase:
-#                     ax.plot(faultsLVBase,   valsLVBase,   color=baseCOL,   linewidth=LW, marker=baseMRK,   markersize=MS, linestyle=baseLS,   label=baseHS)
-#                 if len(faultsLVCheap) > 0: #and not runCheap:
-#                     ax.plot(faultsLVCheap,  valsLVCheap,  color=cheapCOL,  linewidth=LW, marker=cheapMRK,  markersize=MS, linestyle=cheapLS,  label=cheapHS)
-#                 if len(faultsLVQuick) > 0: #and not runQuick:
-#                     ax.plot(faultsLVQuick,  valsLVQuick,  color=quickCOL,  linewidth=LW, marker=quickMRK,  markersize=MS, linestyle=quickLS,  label=quickHS)
-#                 if len(faultsLVComb) > 0: #and not runComb:
-#                     ax.plot(faultsLVComb,   valsLVComb,   color=combCOL,   linewidth=LW, marker=combMRK,   markersize=MS, linestyle=combLS,   label=combHS)
-#                 if len(faultsLVFree) > 0: #and not runFree:
-#                     ax.plot(faultsLVFree,   valsLVFree,   color=freeCOL,   linewidth=LW, marker=freeMRK,   markersize=MS, linestyle=freeLS,   label=freeHS)
-#                 if len(faultsLVOnep) > 0: #and not runOnep:
-#                     ax.plot(faultsLVOnep,   valsLVOnep,   color=onepCOL,   linewidth=LW, marker=onepMRK,   markersize=MS, linestyle=onepLS,   label=onepHS)
-#                 if len(faultsLVOnepB) > 0: #and not runOnepB:
-#                     ax.plot(faultsLVOnepB,  valsLVOnepB,  color=onepbCOL,  linewidth=LW, marker=onepbMRK,  markersize=MS, linestyle=onepbLS,  label=onepbHS)
-#                 if len(faultsLVOnepC) > 0: #and not runOnepC:
-#                     ax.plot(faultsLVOnepC,  valsLVOnepC,  color=onepcCOL,  linewidth=LW, marker=onepcMRK,  markersize=MS, linestyle=onepcLS,  label=onepcHS)
-#                 if len(faultsLVOnepD) > 0: #and not runOnepD:
-#                     ax.plot(faultsLVOnepD,  valsLVOnepD,  color=onepdCOL,  linewidth=LW, marker=onepdMRK,  markersize=MS, linestyle=onepdLS,  label=onepdHS)
-#             if plotChained:
-#                 if len(faultsLVChBase) > 0:
-#                     ax.plot(faultsLVChBase, valsLVChBase, color=baseChCOL, linewidth=LW, marker=baseChMRK, markersize=MS, linestyle=baseChLS, label=baseChHS)
-#                 if len(faultsLVChComb) > 0:
-#                     ax.plot(faultsLVChComb, valsLVChComb, color=combChCOL, linewidth=LW, marker=combChMRK, markersize=MS, linestyle=combChLS, label=combChHS)
-#             if debugPlot:
-#                 if plotBasic:
-#                     for x,y,z in zip(faultsLVBase, valsLVBase, numsLVBase):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVCheap, valsLVCheap, numsLVCheap):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVQuick, valsLVQuick, numsLVQuick):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVComb, valsLVComb, numsLVComb):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVFree, valsLVFree, numsLVFree):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVOnep, valsLVOnep, numsLVOnep):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVOnepB, valsLVOnepB, numsLVOnepB):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVOnepC, valsLVOnepC, numsLVOnepC):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVOnepD, valsLVOnepD, numsLVOnepD):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                 if plotChained:
-#                     for x,y,z in zip(faultsLVChBase, valsLVChBase, numsLVChBase):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsLVChComb, valsLVChComb, numsLVChComb):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#         if plotHandle:
-#             if plotBasic:
-#                 if len(faultsHBase) > 0:
-#                     ax.plot(faultsHBase,   valsHBase,   color=baseCOL,   linewidth=LW, marker="+", markersize=MS, linestyle=baseLS,   label=baseHS+"")
-#                 if len(faultsHCheap) > 0:
-#                     ax.plot(faultsHCheap,  valsHCheap,  color=cheapCOL,  linewidth=LW, marker="+", markersize=MS, linestyle=cheapLS,  label=cheapHS+"")
-#                 if len(faultsHQuick) > 0:
-#                     ax.plot(faultsHQuick,  valsHQuick,  color=quickCOL,  linewidth=LW, marker="+", markersize=MS, linestyle=quickLS,  label=quickHS+"")
-#                 if len(faultsHComb) > 0:
-#                     ax.plot(faultsHComb,   valsHComb,   color=combCOL,   linewidth=LW, marker="+", markersize=MS, linestyle=combLS,   label=combHS+"")
-#                 if len(faultsHFree) > 0:
-#                     ax.plot(faultsHFree,   valsHFree,   color=freeCOL,   linewidth=LW, marker="+", markersize=MS, linestyle=freeLS,   label=freeHS+"")
-#                 if len(faultsHOnep) > 0:
-#                     ax.plot(faultsHOnep,   valsHOnep,   color=onepCOL,   linewidth=LW, marker="+", markersize=MS, linestyle=onepLS,   label=onepHS+"")
-#                 if len(faultsHOnepB) > 0:
-#                     ax.plot(faultsHOnepB,  valsHOnepB,  color=onepbCOL,  linewidth=LW, marker="+", markersize=MS, linestyle=onepbLS,  label=onepbHS+"")
-#                 if len(faultsHOnepC) > 0:
-#                     ax.plot(faultsHOnepC,  valsHOnepC,  color=onepcCOL,  linewidth=LW, marker="+", markersize=MS, linestyle=onepcLS,  label=onepcHS+"")
-#                 if len(faultsHOnepD) > 0:
-#                     ax.plot(faultsHOnepD,  valsHOnepD,  color=onepdCOL,  linewidth=LW, marker="+", markersize=MS, linestyle=onepdLS,  label=onepdHS+"")
-#             if plotChained:
-#                 if len(faultsHChBase) > 0:
-#                     ax.plot(faultsHChBase, valsHChBase, color=baseChCOL, linewidth=LW, marker="+", markersize=MS, linestyle=baseChLS, label=baseChHS+"")
-#                 if len(faultsHChComb) > 0:
-#                     ax.plot(faultsHChComb, valsHChComb, color=combChCOL, linewidth=LW, marker="+", markersize=MS, linestyle=combChLS, label=combChHS+"")
-#             if debugPlot:
-#                 if plotBasic:
-#                     for x,y,z in zip(faultsHBase, valsHBase, numsHBase):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHCheap, valsHCheap, numsHCheap):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHQuick, valsHQuick, numsHQuick):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHComb, valsHComb, numsHComb):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHFree, valsHFree, numsHFree):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHOnep, valsHOnep, numsHOnep):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHOnepB, valsHOnepB, numsHOnepB):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHOnepC, valsHOnepC, numsHOnepC):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHOnepD, valsHOnepD, numsHOnepD):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                 if plotChained:
-#                     for x,y,z in zip(faultsHChBase, valsHChBase, numsHChBase):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsHChComb, valsHChComb, numsHChComb):
-#                         ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#         if plotCrypto: # Sign
-#             if plotBasic:
-#                 if len(faultsCSBase) > 0:
-#                     axs[0].plot(faultsCSBase,   valsCSBase,   color=baseCOL,   linewidth=LW, marker="1", markersize=MS, linestyle=baseLS,   label=baseHS+" (crypto-sign)")
-#                 if len(faultsCSCheap) > 0:
-#                     axs[0].plot(faultsCSCheap,  valsCSCheap,  color=cheapCOL,  linewidth=LW, marker="1", markersize=MS, linestyle=cheapLS,  label=cheapHS+" (crypto-sign)")
-#                 if len(faultsCSQuick) > 0:
-#                     axs[0].plot(faultsCSQuick,  valsCSQuick,  color=quickCOL,  linewidth=LW, marker="1", markersize=MS, linestyle=quickLS,  label=quickHS+" (crypto-sign)")
-#                 if len(faultsCSComb) > 0:
-#                     axs[0].plot(faultsCSComb,   valsCSComb,   color=combCOL,   linewidth=LW, marker="1", markersize=MS, linestyle=combLS,   label=combHS+" (crypto-sign)")
-#                 if len(faultsCSFree) > 0:
-#                     axs[0].plot(faultsCSFree,   valsCSFree,   color=freeCOL,   linewidth=LW, marker="1", markersize=MS, linestyle=freeLS,   label=freeHS+" (crypto-sign)")
-#                 if len(faultsCSOnep) > 0:
-#                     axs[0].plot(faultsCSOnep,   valsCSOnep,   color=onepCOL,   linewidth=LW, marker="1", markersize=MS, linestyle=onepLS,   label=onepHS+" (crypto-sign)")
-#                 if len(faultsCSOnepB) > 0:
-#                     axs[0].plot(faultsCSOnepB,  valsCSOnepB,  color=onepbCOL,  linewidth=LW, marker="1", markersize=MS, linestyle=onepbLS,  label=onepbHS+" (crypto-sign)")
-#                 if len(faultsCSOnepC) > 0:
-#                     axs[0].plot(faultsCSOnepC,  valsCSOnepC,  color=onepcCOL,  linewidth=LW, marker="1", markersize=MS, linestyle=onepcLS,  label=onepcHS+" (crypto-sign)")
-#                 if len(faultsCSOnepD) > 0:
-#                     axs[0].plot(faultsCSOnepD,  valsCSOnepD,  color=onepdCOL,  linewidth=LW, marker="1", markersize=MS, linestyle=onepdLS,  label=onepdHS+" (crypto-sign)")
-#             if plotChained:
-#                 if len(faultsCSChBase) > 0:
-#                     axs[0].plot(faultsCSChBase, valsCSChBase, color=baseChCOL, linewidth=LW, marker="1", markersize=MS, linestyle=baseChLS, label=baseChHS+" (crypto-sign)")
-#                 if len(faultsCSChComb) > 0:
-#                     axs[0].plot(faultsCSChComb, valsCSChComb, color=combChCOL, linewidth=LW, marker="1", markersize=MS, linestyle=combChLS, label=combChHS+" (crypto-sign)")
-#             if debugPlot:
-#                 if plotBasic:
-#                     for x,y,z in zip(faultsCSBase, valsCSBase, numsCSBase):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSCheap, valsCSCheap, numsCSCheap):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSQuick, valsCSQuick, numsCSQuick):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSComb, valsCSComb, numsCSComb):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSFree, valsCSFree, numsCSFree):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSOnep, valsCSOnep, numsCSOnep):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSOnepB, valsCSOnepB, numsCSOnepB):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSOnepC, valsCSOnepC, numsCSOnepC):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSOnepD, valsCSOnepD, numsCSOnepD):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                 if plotChained:
-#                     for x,y,z in zip(faultsCSChBase, valsCSChBase, numsCSChBase):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCSChComb, valsCSChComb, numsCSChComb):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#         if plotCrypto: # Verif
-#             if plotBasic:
-#                 if len(faultsCVBase) > 0:
-#                     axs[0].plot(faultsCVBase,   valsCVBase,   color=baseCOL,   linewidth=LW, marker="2", markersize=MS, linestyle=baseLS,   label=baseHS+" (crypto-verif)")
-#                 if len(faultsCVCheap) > 0:
-#                     axs[0].plot(faultsCVCheap,  valsCVCheap,  color=cheapCOL,  linewidth=LW, marker="2", markersize=MS, linestyle=cheapLS,  label=cheapHS+" (crypto-verif)")
-#                 if len(faultsCVQuick) > 0:
-#                     axs[0].plot(faultsCVQuick,  valsCVQuick,  color=quickCOL,  linewidth=LW, marker="2", markersize=MS, linestyle=quickLS,  label=quickHS+" (crypto-verif)")
-#                 if len(faultsCVComb) > 0:
-#                     axs[0].plot(faultsCVComb,   valsCVComb,   color=combCOL,   linewidth=LW, marker="2", markersize=MS, linestyle=combLS,   label=combHS+" (crypto-verif)")
-#                 if len(faultsCVFree) > 0:
-#                     axs[0].plot(faultsCVFree,   valsCVFree,   color=freeCOL,   linewidth=LW, marker="2", markersize=MS, linestyle=freeLS,   label=freeHS+" (crypto-verif)")
-#                 if len(faultsCVOnep) > 0:
-#                     axs[0].plot(faultsCVOnep,   valsCVOnep,   color=onepCOL,   linewidth=LW, marker="2", markersize=MS, linestyle=onepLS,   label=onepHS+" (crypto-verif)")
-#                 if len(faultsCVOnepB) > 0:
-#                     axs[0].plot(faultsCVOnepB,  valsCVOnepB,  color=onepbCOL,  linewidth=LW, marker="2", markersize=MS, linestyle=onepbLS,  label=onepbHS+" (crypto-verif)")
-#                 if len(faultsCVOnepC) > 0:
-#                     axs[0].plot(faultsCVOnepC,  valsCVOnepC,  color=onepcCOL,  linewidth=LW, marker="2", markersize=MS, linestyle=onepcLS,  label=onepcHS+" (crypto-verif)")
-#                 if len(faultsCVOnepD) > 0:
-#                     axs[0].plot(faultsCVOnepD,  valsCVOnepD,  color=onepdCOL,  linewidth=LW, marker="2", markersize=MS, linestyle=onepdLS,  label=onepdHS+" (crypto-verif)")
-#             if plotChained:
-#                 if len(faultsCVChBase) > 0:
-#                     axs[0].plot(faultsCVChBase, valsCVChBase, color=baseChCOL, linewidth=LW, marker="2", markersize=MS, linestyle=baseChLS, label=baseChHS+" (crypto-verif)")
-#                 if len(faultsCVChComb) > 0:
-#                     axs[0].plot(faultsCVChComb, valsCVChComb, color=combChCOL, linewidth=LW, marker="2", markersize=MS, linestyle=combChLS, label=combChHS+" (crypto-verif)")
-#             if debugPlot:
-#                 if plotBasic:
-#                     for x,y,z in zip(faultsCVBase, valsCVBase, numsCVBase):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVCheap, valsCVCheap, numsCVCheap):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVQuick, valsCVQuick, numsCVQuick):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVComb, valsCVComb, numsCVComb):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVFree, valsCVFree, numsCVFree):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVOnep, valsCVOnep, numsCVOnep):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVOnepB, valsCVOnepB, numsCVOnepB):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVOnepC, valsCVOnepC, numsCVOnepC):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVOnepD, valsCVOnepD, numsCVOnepD):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                 if plotChained:
-#                     for x,y,z in zip(faultsCVChBase, valsCVChBase, numsCVChBase):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     for x,y,z in zip(faultsCVChComb, valsCVChComb, numsCVChComb):
-#                         axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#         # legend
-#         if showLegend2 or (showLegend1 and not plotThroughput):
-#             ax.legend(prop={'size': 9})
-
-#     #fig.subplots_adjust(hspace=0.5)
-#     fig.savefig(plotFile, bbox_inches='tight', pad_inches=0.05)
-#     print("points are in", pFile)
-#     print("plot is in", plotFile)
-#     if displayPlot:
-#         try:
-#             subprocess.call([displayApp, plotFile])
-#         except:
-#             print("couldn't display the plot using '" + displayApp + "'. Consider changing the 'displayApp' variable.")
-#     return (dictTVBase, dictTVCheap, dictTVQuick, dictTVComb, dictTVFree, dictTVOnep, dictTVOnepB, dictTVOnepC, dictTVOnepD, dictTVChBase, dictTVChComb,
-#             dictLVBase, dictLVCheap, dictLVQuick, dictLVComb, dictLVFree, dictLVOnep, dictLVOnepB, dictLVOnepC, dictLVOnepD, dictLVChBase, dictLVChComb)
-# # End of createPlot
-
-
-
-# def createPlotPayloadAux(pFile):
-#     # throughput-view
-#     dictTVBase   = {}
-#     dictTVCheap  = {}
-#     dictTVQuick  = {}
-#     dictTVComb   = {}
-#     dictTVFree   = {}
-#     dictTVOnep   = {}
-#     dictTVOnepB  = {}
-#     dictTVOnepC  = {}
-#     dictTVOnepD  = {}
-#     dictTVChBase = {}
-#     dictTVChComb = {}
-#     # latency-view
-#     dictLVBase   = {}
-#     dictLVCheap  = {}
-#     dictLVQuick  = {}
-#     dictLVComb   = {}
-#     dictLVFree   = {}
-#     dictLVOnep   = {}
-#     dictLVOnepB  = {}
-#     dictLVOnepC  = {}
-#     dictLVOnepD  = {}
-#     dictLVChBase = {}
-#     dictLVChComb = {}
-#     # handle
-#     dictHBase   = {}
-#     dictHCheap  = {}
-#     dictHQuick  = {}
-#     dictHComb   = {}
-#     dictHFree   = {}
-#     dictHOnep   = {}
-#     dictHOnepB  = {}
-#     dictHOnepC  = {}
-#     dictHOnepD  = {}
-#     dictHChBase = {}
-#     dictHChComb = {}
-#     # crypto-sign
-#     dictCSBase   = {}
-#     dictCSCheap  = {}
-#     dictCSQuick  = {}
-#     dictCSComb   = {}
-#     dictCSFree   = {}
-#     dictCSOnep   = {}
-#     dictCSOnepB  = {}
-#     dictCSOnepC  = {}
-#     dictCSOnepD  = {}
-#     dictCSChBase = {}
-#     dictCSChComb = {}
-#     # crypto-verif
-#     dictCVBase   = {}
-#     dictCVCheap  = {}
-#     dictCVQuick  = {}
-#     dictCVComb   = {}
-#     dictCVFree   = {}
-#     dictCVOnep   = {}
-#     dictCVOnepB  = {}
-#     dictCVOnepC  = {}
-#     dictCVOnepD  = {}
-#     dictCVChBase = {}
-#     dictCVChComb = {}
-
-#     global dockerCpu, dockerMem, networkLat, rateMbit, payloadSize, repeats, repeatsL2, numViews
-
-#     # We accumulate all the points in dictionaries
-#     print("reading points from:", pFile)
-#     f = open(pFile,'r')
-#     for line in f.readlines():
-#         if line.startswith("##params"):
-#             args = line.split(" ")
-#             cpu     = "cpus=0"
-#             mem     = "mem=0"
-#             lat     = "lat=0"
-#             rate    = "rate=0"
-#             payload = "payload=0"
-#             rep1    = "repeats1=0"
-#             rep2    = "repeats2=0"
-#             views   = "views=0"
-#             regs    = "regions=one"
-#             if len(args) == 9:
-#                 [hdr,cpu,mem,lat,payload,rep1,rep2,views,regs] = args
-#             elif len(args) == 10:
-#                 [hdr,cpu,mem,lat,rate,payload,rep1,rep2,views,regs] = args
-#             else:
-#                 print("WRONG ARGUMENTS in ##params comment")
-#             [cpuTag,cpuVal] = cpu.split("=")
-#             dockerCpu = float(cpuVal)
-#             [memTag,memVal] = mem.split("=")
-#             dockerMem = int(memVal)
-#             [latTag,latVal] = lat.split("=")
-#             networkLat = float(latVal)
-#             [rateTag,rateVal] = rate.split("=")
-#             rateMbit = float(rateVal)
-#             [payloadTag,payloadVal] = payload.split("=")
-#             payloadSize = int(payloadVal)
-#             [rep1Tag,rep1Val] = rep1.split("=")
-#             repeats = int(rep1Val)
-#             [rep2Tag,rep2Val] = rep2.split("=")
-#             repeatsL2 = int(rep2Val)
-#             [viewsTag,viewsVal] = views.split("=")
-#             numViews = int(viewsVal)
-#             [regsTag,regsVal] = regs.split("=")
-#             setRegion(regsVal)
-
-#         if line.startswith("protocol"):
-#             [prot,faults,point]   = line.split(" ")
-#             [protTag,protVal]     = prot.split("=")
-#             [faultsTag,faultsVal] = faults.split("=")
-#             [pointTag,pointVal]   = point.split("=")
-#             numFaults=int(faultsVal)
-#             if float(pointVal) < float('inf'):
-#                 # Throughputs-view
-#                 if pointTag == "throughput-view" and protVal == "BASIC_BASELINE":
-#                     (val,num) = dictTVBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVBase.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "BASIC_CHEAP":
-#                     (val,num) = dictTVCheap.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVCheap.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "BASIC_QUICK":
-#                     (val,num) = dictTVQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVQuick.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "BASIC_QUICK_DEBUG":
-#                     (val,num) = dictTVQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVQuick.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "BASIC_HYBRID_TEE":
-#                     (val,num) = dictTVComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVComb.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "BASIC_FREE":
-#                     (val,num) = dictTVFree.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVFree.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "BASIC_ONEP":
-#                     (val,num) = dictTVOnep.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVOnep.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "CHAINED_BASELINE":
-#                     (val,num) = dictTVChBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVChBase.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "CHAINED_CHEAP_AND_QUICK":
-#                     (val,num) = dictTVChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVChComb.update({payloadSize:(val,num+1)})
-#                 if pointTag == "throughput-view" and protVal == "CHAINED_CHEAP_AND_QUICK_DEBUG":
-#                     (val,num) = dictTVChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictTVChComb.update({payloadSize:(val,num+1)})
-#                 # Latencies-view
-#                 if pointTag == "latency-view" and protVal == "BASIC_BASELINE":
-#                     (val,num) = dictLVBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVBase.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "BASIC_CHEAP":
-#                     (val,num) = dictLVCheap.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVCheap.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "BASIC_QUICK":
-#                     (val,num) = dictLVQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVQuick.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "BASIC_QUICK_DEBUG":
-#                     (val,num) = dictLVQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVQuick.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "BASIC_HYBRID_TEE":
-#                     (val,num) = dictLVComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVComb.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "BASIC_FREE":
-#                     (val,num) = dictLVFree.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVFree.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "BASIC_ONEP":
-#                     (val,num) = dictLVOnep.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVOnep.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "CHAINED_BASELINE":
-#                     (val,num) = dictLVChBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVChBase.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "CHAINED_CHEAP_AND_QUICK":
-#                     (val,num) = dictLVChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVChComb.update({payloadSize:(val,num+1)})
-#                 if pointTag == "latency-view" and protVal == "CHAINED_CHEAP_AND_QUICK_DEBUG":
-#                     (val,num) = dictLVChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal))
-#                     dictLVChComb.update({payloadSize:(val,num+1)})
-#                 # handle
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "BASIC_BASELINE":
-#                     (val,num) = dictHBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHBase.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "BASIC_CHEAP":
-#                     (val,num) = dictHCheap.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHCheap.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "BASIC_QUICK":
-#                     (val,num) = dictHQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHQuick.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "BASIC_QUICK_DEBUG":
-#                     (val,num) = dictHQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHQuick.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "BASIC_HYBRID_TEE":
-#                     (val,num) = dictHComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHComb.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "BASIC_FREE":
-#                     (val,num) = dictHFree.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHFree.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "BASIC_ONEP":
-#                     (val,num) = dictHOnep.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHOnep.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "CHAINED_BASELINE":
-#                     (val,num) = dictHChBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHChBase.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "CHAINED_CHEAP_AND_QUICK":
-#                     (val,num) = dictHChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHChComb.update({payloadSize:(val,num+1)})
-#                 if (pointTag == "handle" or pointTag == "latency-handle") and protVal == "CHAINED_CHEAP_AND_QUICK_DEBUG":
-#                     (val,num) = dictHChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictHChComb.update({payloadSize:(val,num+1)})
-#                 # crypto-sign
-#                 if pointTag == "crypto-sign" and protVal == "BASIC_BASELINE":
-#                     (val,num) = dictCSBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSBase.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "BASIC_CHEAP":
-#                     (val,num) = dictCSCheap.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSCheap.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "BASIC_QUICK":
-#                     (val,num) = dictCSQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSQuick.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "BASIC_QUICK_DEBUG":
-#                     (val,num) = dictCSQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSQuick.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "BASIC_HYBRID_TEE":
-#                     (val,num) = dictCSComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSComb.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "BASIC_FREE":
-#                     (val,num) = dictCSFree.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSFree.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "BASIC_ONEP":
-#                     (val,num) = dictCSOnep.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSOnep.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "CHAINED_BASELINE":
-#                     (val,num) = dictCSChBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSChBase.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "CHAINED_CHEAP_AND_QUICK":
-#                     (val,num) = dictCSChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSChComb.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-sign" and protVal == "CHAINED_CHEAP_AND_QUICK_DEBUG":
-#                     (val,num) = dictCSChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCSChComb.update({payloadSize:(val,num+1)})
-#                 # crypto-verif
-#                 if pointTag == "crypto-verif" and protVal == "BASIC_BASELINE":
-#                     (val,num) = dictCVBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVBase.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "BASIC_CHEAP":
-#                     (val,num) = dictCVCheap.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVCheap.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "BASIC_QUICK":
-#                     (val,num) = dictCVQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVQuick.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "BASIC_QUICK_DEBUG":
-#                     (val,num) = dictCVQuick.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVQuick.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "BASIC_HYBRID_TEE":
-#                     (val,num) = dictCVComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVComb.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "BASIC_FREE":
-#                     (val,num) = dictCVFree.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVFree.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "BASIC_ONEP":
-#                     (val,num) = dictCVOnep.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVOnep.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "CHAINED_BASELINE":
-#                     (val,num) = dictCVChBase.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVChBase.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "CHAINED_CHEAP_AND_QUICK":
-#                     (val,num) = dictCVChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVChComb.update({payloadSize:(val,num+1)})
-#                 if pointTag == "crypto-verif" and protVal == "CHAINED_CHEAP_AND_QUICK_DEBUG":
-#                     (val,num) = dictCVChComb.get(payloadSize,([],0))
-#                     val.append(float(pointVal) / numViews)
-#                     dictCVChComb.update({payloadSize:(val,num+1)})
-#     f.close()
-
-#     quantileSize = 20
-#     quantileSize1 = 20
-#     quantileSize2 = 20
-
-#     # We convert the dictionaries to lists
-#     # throughput-view
-#     (payloadsTVBase,   valsTVBase,   numsTVBase)   = dict2lists(dictTVBase,quantileSize,False)
-#     (payloadsTVCheap,  valsTVCheap,  numsTVCheap)  = dict2lists(dictTVCheap,quantileSize,False)
-#     (payloadsTVQuick,  valsTVQuick,  numsTVQuick)  = dict2lists(dictTVQuick,quantileSize,False)
-#     (payloadsTVComb,   valsTVComb,   numsTVComb)   = dict2lists(dictTVComb,quantileSize,False)
-#     (payloadsTVFree,   valsTVFree,   numsTVFree)   = dict2lists(dictTVFree,quantileSize,False)
-#     (payloadsTVOnep,   valsTVOnep,   numsTVOnep)   = dict2lists(dictTVOnep,quantileSize,False)
-#     (payloadsTVChBase, valsTVChBase, numsTVChBase) = dict2lists(dictTVChBase,quantileSize,False)
-#     (payloadsTVChComb, valsTVChComb, numsTVChComb) = dict2lists(dictTVChComb,quantileSize,False)
-#     # latency-view
-#     (payloadsLVBase,   valsLVBase,   numsLVBase)   = dict2lists(dictLVBase,quantileSize,False)
-#     (payloadsLVCheap,  valsLVCheap,  numsLVCheap)  = dict2lists(dictLVCheap,quantileSize,False)
-#     (payloadsLVQuick,  valsLVQuick,  numsLVQuick)  = dict2lists(dictLVQuick,quantileSize,False)
-#     (payloadsLVComb,   valsLVComb,   numsLVComb)   = dict2lists(dictLVComb,quantileSize,False)
-#     (payloadsLVFree,   valsLVFree,   numsLVFree)   = dict2lists(dictLVFree,quantileSize,False)
-#     (payloadsLVOnep,   valsLVOnep,   numsLVOnep)   = dict2lists(dictLVOnep,quantileSize,False)
-#     (payloadsLVChBase, valsLVChBase, numsLVChBase) = dict2lists(dictLVChBase,quantileSize,False)
-#     (payloadsLVChComb, valsLVChComb, numsLVChComb) = dict2lists(dictLVChComb,quantileSize,False)
-#     # handle
-#     (payloadsHBase,   valsHBase,   numsHBase)   = dict2lists(dictHBase,quantileSize1,False)
-#     (payloadsHCheap,  valsHCheap,  numsHCheap)  = dict2lists(dictHCheap,quantileSize1,False)
-#     (payloadsHQuick,  valsHQuick,  numsHQuick)  = dict2lists(dictHQuick,quantileSize1,False)
-#     (payloadsHComb,   valsHComb,   numsHComb)   = dict2lists(dictHComb,quantileSize1,False)
-#     (payloadsHFree,   valsHFree,   numsHFree)   = dict2lists(dictHFree,quantileSize1,False)
-#     (payloadsHOnep,   valsHOnep,   numsHOnep)   = dict2lists(dictHOnep,quantileSize1,False)
-#     (payloadsHChBase, valsHChBase, numsHChBase) = dict2lists(dictHChBase,quantileSize1,False)
-#     (payloadsHChComb, valsHChComb, numsHChComb) = dict2lists(dictHChComb,quantileSize1,False)
-#     # crypto-sign
-#     (payloadsCSBase,   valsCSBase,   numsCSBase)   = dict2lists(dictCSBase,quantileSize2,False)
-#     (payloadsCSCheap,  valsCSCheap,  numsCSCheap)  = dict2lists(dictCSCheap,quantileSize2,False)
-#     (payloadsCSQuick,  valsCSQuick,  numsCSQuick)  = dict2lists(dictCSQuick,quantileSize2,False)
-#     (payloadsCSComb,   valsCSComb,   numsCSComb)   = dict2lists(dictCSComb,quantileSize2,False)
-#     (payloadsCSFree,   valsCSFree,   numsCSFree)   = dict2lists(dictCSFree,quantileSize2,False)
-#     (payloadsCSOnep,   valsCSOnep,   numsCSOnep)   = dict2lists(dictCSOnep,quantileSize2,False)
-#     (payloadsCSChBase, valsCSChBase, numsCSChBase) = dict2lists(dictCSChBase,quantileSize2,False)
-#     (payloadsCSChComb, valsCSChComb, numsCSChComb) = dict2lists(dictCSChComb,quantileSize2,False)
-#     # crypto-verif
-#     (payloadsCVBase,   valsCVBase,   numsCVBase)   = dict2lists(dictCVBase,quantileSize2,False)
-#     (payloadsCVCheap,  valsCVCheap,  numsCVCheap)  = dict2lists(dictCVCheap,quantileSize2,False)
-#     (payloadsCVQuick,  valsCVQuick,  numsCVQuick)  = dict2lists(dictCVQuick,quantileSize2,False)
-#     (payloadsCVComb,   valsCVComb,   numsCVComb)   = dict2lists(dictCVComb,quantileSize2,False)
-#     (payloadsCVFree,   valsCVFree,   numsCVFree)   = dict2lists(dictCVFree,quantileSize2,False)
-#     (payloadsCVOnep,   valsCVOnep,   numsCVOnep)   = dict2lists(dictCVOnep,quantileSize2,False)
-#     (payloadsCVChBase, valsCVChBase, numsCVChBase) = dict2lists(dictCVChBase,quantileSize2,False)
-#     (payloadsCVChComb, valsCVChComb, numsCVChComb) = dict2lists(dictCVChComb,quantileSize2,False)
-
-#     print("payloads/throughputs(val+num)/latencies(val+num)/cypto-verif(val+num)/cypto-sign(val+num) for (baseline/cheap/quick/combined/free/onep/chained-baseline/chained-combined)")
-#     print((payloadsTVBase,   (valsTVBase,   numsTVBase),   (valsLVBase,   numsLVBase),   (valsCVBase,   numsCVBase),   (valsCSBase,   numsCSBase)))
-#     print((payloadsTVCheap,  (valsTVCheap,  numsTVCheap),  (valsLVCheap,  numsLVCheap),  (valsCVCheap,  numsCVCheap),  (valsCSCheap,  numsCSCheap)))
-#     print((payloadsTVQuick,  (valsTVQuick,  numsTVQuick),  (valsLVQuick,  numsLVQuick),  (valsCVQuick,  numsCVQuick),  (valsCSQuick,  numsCSQuick)))
-#     print((payloadsTVComb,   (valsTVComb,   numsTVComb),   (valsLVComb,   numsLVComb),   (valsCVComb,   numsCVComb),   (valsCSComb,   numsCSComb)))
-#     print((payloadsTVFree,   (valsTVFree,   numsTVFree),   (valsLVFree,   numsLVFree),   (valsCVFree,   numsCVFree),   (valsCSFree,   numsCSFree)))
-#     print((payloadsTVOnep,   (valsTVOnep,   numsTVOnep),   (valsLVOnep,   numsLVOnep),   (valsCVOnep,   numsCVOnep),   (valsCSOnep,   numsCSOnep)))
-#     print((payloadsTVChBase, (valsTVChBase, numsTVChBase), (valsLVChBase, numsLVChBase), (valsCVChBase, numsCVChBase), (valsCSChBase, numsCSChBase)))
-#     print((payloadsTVChComb, (valsTVChComb, numsTVChComb), (valsLVChComb, numsLVChComb), (valsCVChComb, numsCVChComb), (valsCSChComb, numsCSChComb)))
-
-#     print("Throughput gain (basic versions):")
-#     # non-chained
-#     getPercentage(False,baseHS,payloadsTVBase,valsTVBase,cheapHS,payloadsTVCheap,valsTVCheap)
-#     getPercentage(False,baseHS,payloadsTVBase,valsTVBase,quickHS,payloadsTVQuick,valsTVQuick)
-#     getPercentage(False,baseHS,payloadsTVBase,valsTVBase,combHS, payloadsTVComb, valsTVComb)
-#     getPercentage(False,baseHS,payloadsTVBase,valsTVBase,freeHS, payloadsTVFree, valsTVFree)
-#     getPercentage(False,combHS,payloadsTVComb,valsTVComb,freeHS, payloadsTVFree, valsTVFree)
-#     getPercentage(False,baseHS,payloadsTVBase,valsTVBase,onepHS, payloadsTVOnep, valsTVOnep)
-#     getPercentage(False,combHS,payloadsTVComb,valsTVComb,onepHS, payloadsTVOnep, valsTVOnep)
-#     # chained
-#     getPercentage(False,baseChHS,payloadsTVChBase,valsTVChBase,combChHS,payloadsTVChComb,valsTVChComb)
-
-#     print("Latency gain (basic versions):")
-#     # non-chained
-#     getPercentage(True,baseHS,payloadsLVBase,valsLVBase,cheapHS,payloadsLVCheap,valsLVCheap)
-#     getPercentage(True,baseHS,payloadsLVBase,valsLVBase,quickHS,payloadsLVQuick,valsLVQuick)
-#     getPercentage(True,baseHS,payloadsLVBase,valsLVBase,combHS, payloadsLVComb, valsLVComb)
-#     getPercentage(True,baseHS,payloadsLVBase,valsLVBase,freeHS, payloadsLVFree, valsLVFree)
-#     getPercentage(True,combHS,payloadsLVComb,valsLVComb,freeHS, payloadsLVFree, valsLVFree)
-#     getPercentage(True,baseHS,payloadsLVBase,valsLVBase,onepHS, payloadsLVOnep, valsLVOnep)
-#     getPercentage(True,combHS,payloadsLVComb,valsLVComb,onepHS, payloadsLVOnep, valsLVOnep)
-#     # chained
-#     getPercentage(True,baseChHS,payloadsLVChBase,valsLVChBase,combChHS,payloadsLVChComb,valsLVChComb)
-
-#     print("Handle gain (basic versions):")
-#     # non-chained
-#     getPercentage(True,baseHS,payloadsHBase,valsHBase,cheapHS,payloadsHCheap,valsHCheap)
-#     getPercentage(True,baseHS,payloadsHBase,valsHBase,quickHS,payloadsHQuick,valsHQuick)
-#     getPercentage(True,baseHS,payloadsHBase,valsHBase,combHS, payloadsHComb, valsHComb)
-#     getPercentage(True,baseHS,payloadsHBase,valsHBase,freeHS, payloadsHFree, valsHFree)
-#     getPercentage(True,combHS,payloadsHComb,valsHComb,freeHS, payloadsHFree, valsHFree)
-#     getPercentage(True,baseHS,payloadsHBase,valsHBase,onepHS, payloadsHOnep, valsHOnep)
-#     getPercentage(True,combHS,payloadsHComb,valsHComb,onepHS, payloadsHOnep, valsHOnep)
-#     # chained
-#     getPercentage(True,baseChHS,payloadsHChBase,valsHChBase,combChHS,payloadsHChComb,valsHChComb)
-
-#     return (rateMbit,
-#             # throughput-view
-#             payloadsTVBase,   valsTVBase,   numsTVBase,
-#             payloadsTVCheap,  valsTVCheap,  numsTVCheap,
-#             payloadsTVQuick,  valsTVQuick,  numsTVQuick,
-#             payloadsTVComb,   valsTVComb,   numsTVComb,
-#             payloadsTVFree,   valsTVFree,   numsTVFree,
-#             payloadsTVOnep,   valsTVOnep,   numsTVOnep,
-#             payloadsTVChBase, valsTVChBase, numsTVChBase,
-#             payloadsTVChComb, valsTVChComb, numsTVChComb,
-#             # latency-view
-#             payloadsLVBase,   valsLVBase,   numsLVBase,
-#             payloadsLVCheap,  valsLVCheap,  numsLVCheap,
-#             payloadsLVQuick,  valsLVQuick,  numsLVQuick,
-#             payloadsLVComb,   valsLVComb,   numsLVComb,
-#             payloadsLVFree,   valsLVFree,   numsLVFree,
-#             payloadsLVOnep,   valsLVOnep,   numsLVOnep,
-#             payloadsLVChBase, valsLVChBase, numsLVChBase,
-#             payloadsLVChComb, valsLVChComb, numsLVChComb,
-#             # handle
-#             payloadsHBase,   valsHBase,   numsHBase,
-#             payloadsHCheap,  valsHCheap,  numsHCheap,
-#             payloadsHQuick,  valsHQuick,  numsHQuick,
-#             payloadsHComb,   valsHComb,   numsHComb,
-#             payloadsHFree,   valsHFree,   numsHFree,
-#             payloadsHOnep,   valsHOnep,   numsHOnep,
-#             payloadsHChBase, valsHChBase, numsHChBase,
-#             payloadsHChComb, valsHChComb, numsHChComb,
-#             # crypto-sign
-#             payloadsCSBase,   valsCSBase,   numsCSBase,
-#             payloadsCSCheap,  valsCSCheap,  numsCSCheap,
-#             payloadsCSQuick,  valsCSQuick,  numsCSQuick,
-#             payloadsCSComb,   valsCSComb,   numsCSComb,
-#             payloadsCSFree,   valsCSFree,   numsCSFree,
-#             payloadsCSOnep,   valsCSOnep,   numsCSOnep,
-#             payloadsCSChBase, valsCSChBase, numsCSChBase,
-#             payloadsCSChComb, valsCSChComb, numsCSChComb,
-#             # crypto-verif
-#             payloadsCVBase,   valsCVBase,   numsCVBase,
-#             payloadsCVCheap,  valsCVCheap,  numsCVCheap,
-#             payloadsCVQuick,  valsCVQuick,  numsCVQuick,
-#             payloadsCVComb,   valsCVComb,   numsCVComb,
-#             payloadsCVFree,   valsCVFree,   numsCVFree,
-#             payloadsCVOnep,   valsCVOnep,   numsCVOnep,
-#             payloadsCVChBase, valsCVChBase, numsCVChBase,
-#             payloadsCVChComb, valsCVChComb, numsCVChComb)
-# ## End of createPlotPayloadAux
-
-
-
-# def createPlotPayload(files):
-#     LW = 1 # linewidth
-#     MS = 5 # markersize
-#     XYT = (0,5)
-
-#     #plt.figure(figsize=(2, 6))
-#     #, dpi=80)
-
-#     global plotThroughput
-#     global plotLatency
-
-#     global baseCOL
-#     global cheapCOL
-#     global quickCOL
-#     global combCOL
-#     global freeCOL
-#     global onepCOL
-#     global onepbCOL
-#     global onepcCOL
-#     global onepdCOL
-#     global baseChCOL
-#     global combChCOL
-
-#     if (plotHandle or plotCrypto) and not plotView:
-#         plotThroughput = False
-#         plotLatency    = True
-
-#     numPlots=2
-#     if (plotThroughput and not plotLatency) or (not plotThroughput and plotLatency):
-#         numPlots=1
-
-#     ## Plotting
-#     print("plotting",numPlots,"plot(s)")
-#     fig, axs = plt.subplots(numPlots,1)
-#     if numPlots == 1:
-#         x = axs
-#         axs = [x]
-#     #,figsize=(4, 10)
-#     if showTitle:
-#         if debugPlot:
-#             info = "file="+pFile
-#             info += "; cpus="+str(dockerCpu)
-#             info += "; mem="+str(dockerMem)
-#             info += "; lat="+str(networkLat)
-#             info += "; payload="+str(payloadSize)
-#             info += "; repeats1="+str(repeats)
-#             info += "; repeats2="+str(repeatsL2)
-#             info += "; #views="+str(numViews)
-#             info += "; regions="+regions[0]
-#             if plotHandle and not plotView:
-#                 fig.suptitle("Handling time\n("+info+")")
-#             else:
-#                 fig.suptitle("Throughputs (top) & Latencies (bottom)\n("+info+")")
+#             pass
+#         # ------
+#         # Quick-HotStuff (Accumulator)
+#         if runQuick:
+#             computeAvgStats(recompile,protocol=Protocol.QUICK,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=2*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
 #         else:
-#             if plotHandle and not plotView:
-#                 fig.suptitle("Handling time")
-#             else:
-#                 fig.suptitle("Throughputs (top) & Latencies (bottom)")
-
-#     adjustFigAspect(fig,aspect=0.9)
-#     #adjustFigAspect(fig,aspect=0.9)
-#     if numPlots == 2:
-#         fig.set_figheight(6)
-#     else: # == 1
-#         fig.set_figheight(3)
-#     #fig.set_figwidth(4)
-
-#     width = 20
-
-#     if plotThroughput:
-#         # naming the x/y axis
-#         #axs[0].set(xlabel="payload size", ylabel="throughput")
-#         if showYlabel:
-#             axs[0].set(ylabel="throughput (Kops/s)")
-#         if logScale:
-#             axs[0].set_yscale('log')
-#         if whichExp == "EUexp1":
-#             axs[0].set_yticks((0.5,1,10,20,70))
-#             axs[0].set_ylim([0.5,70])
-#             axs[0].get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-#         elif whichExp == "ALLexp1":
-#             axs[0].set_yticks((0.3,1,6))
-#             axs[0].set_ylim([0.3,6])
-#             axs[0].get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-#         # giving a title to my graph
-#         #axs[0].set_title("throughputs")
-#         # plotting the points
-
-#         posL = 0
-#         posT = 0
-
-#         for file in files:
-#             (rate,
-#              # throughput-view
-#              payloadsTVBase,   valsTVBase,   numsTVBase,
-#              payloadsTVCheap,  valsTVCheap,  numsTVCheap,
-#              payloadsTVQuick,  valsTVQuick,  numsTVQuick,
-#              payloadsTVComb,   valsTVComb,   numsTVComb,
-#              payloadsTVFree,   valsTVFree,   numsTVFree,
-#              payloadsTVOnep,   valsTVOnep,   numsTVOnep,
-#              payloadsTVChBase, valsTVChBase, numsTVChBase,
-#              payloadsTVChComb, valsTVChComb, numsTVChComb,
-#              # latency-view
-#              payloadsLVBase,   valsLVBase,   numsLVBase,
-#              payloadsLVCheap,  valsLVCheap,  numsLVCheap,
-#              payloadsLVQuick,  valsLVQuick,  numsLVQuick,
-#              payloadsLVComb,   valsLVComb,   numsLVComb,
-#              payloadsLVFree,   valsLVFree,   numsLVFree,
-#              payloadsLVOnep,   valsLVOnep,   numsLVOnep,
-#              payloadsLVChBase, valsLVChBase, numsLVChBase,
-#              payloadsLVChComb, valsLVChComb, numsLVChComb,
-#              # handle
-#              payloadsHBase,   valsHBase,   numsHBase,
-#              payloadsHCheap,  valsHCheap,  numsHCheap,
-#              payloadsHQuick,  valsHQuick,  numsHQuick,
-#              payloadsHComb,   valsHComb,   numsHComb,
-#              payloadsHFree,   valsHFree,   numsHFree,
-#              payloadsHOnep,   valsHOnep,   numsHOnep,
-#              payloadsHChBase, valsHChBase, numsHChBase,
-#              payloadsHChComb, valsHChComb, numsHChComb,
-#              # crypto-sign
-#              payloadsCSBase,   valsCSBase,   numsCSBase,
-#              payloadsCSCheap,  valsCSCheap,  numsCSCheap,
-#              payloadsCSQuick,  valsCSQuick,  numsCSQuick,
-#              payloadsCSComb,   valsCSComb,   numsCSComb,
-#              payloadsCSFree,   valsCSFree,   numsCSFree,
-#              payloadsCSOnep,   valsCSOnep,   numsCSOnep,
-#              payloadsCSChBase, valsCSChBase, numsCSChBase,
-#              payloadsCSChComb, valsCSChComb, numsCSChComb,
-#              # crypto-verif
-#              payloadsCVBase,   valsCVBase,   numsCVBase,
-#              payloadsCVCheap,  valsCVCheap,  numsCVCheap,
-#              payloadsCVQuick,  valsCVQuick,  numsCVQuick,
-#              payloadsCVComb,   valsCVComb,   numsCVComb,
-#              payloadsCVFree,   valsCVFree,   numsCVFree,
-#              payloadsCVOnep,   valsCVOnep,   numsCVOnep,
-#              payloadsCVChBase, valsCVChBase, numsCVChBase,
-#              payloadsCVChComb, valsCVChComb, numsCVChComb) = createPlotPayloadAux(file)
-
-#             if rate == 10:
-#                 baseCOL = "black"
-#                 combCOL = "red"
-#             if rate == 100:
-#                 baseCOL = "orange"
-#                 combCOL = "blue"
-#             if rate == 1000:
-#                 baseCOL = "purple"
-#                 combCOL = "green"
-
-#             # axs[0].bar(8, 0.22, width=10)
-#             # axs[0].bar(128, 0.22, width=10)
-#             # axs[0].bar(1024, 0.22, width=10)
-
-#             #axs[0].set_xticklabels([str(x) for x in payloadsTVBase])
-
-#             if plotView:
-#                 if plotBasic:
-#                     if runBase and len(payloadsTVBase) > 0:
-#                         if barPlot:
-#                             payloadsTVBase2 = [x+posT for x in payloadsTVBase]
-#                             axs[0].bar(payloadsTVBase2, valsTVBase, width=width,   color=baseCOL,   linewidth=LW, linestyle=baseLS,   label=baseHS + "(" + str(int(rate)) + ")")
-#                             posT += width
-#                             for (i,j) in zip(payloadsTVBase, valsTVBase):
-#                                 f = open("points","a")
-#                                 f.write("throughput " + str(int(rate)) + " " + str(i) + " " + str(j) + "\n")
-#                                 f.close()
-#                         else:
-#                             axs[0].plot(payloadsTVBase,   valsTVBase,   color=baseCOL,   linewidth=LW, marker=baseMRK,   markersize=MS, linestyle=baseLS,   label=baseHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsTVCheap) > 0:
-#                         axs[0].plot(payloadsTVCheap,  valsTVCheap,  color=cheapCOL,  linewidth=LW, marker=cheapMRK,  markersize=MS, linestyle=cheapLS,  label=cheapHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsTVQuick) > 0:
-#                         axs[0].plot(payloadsTVQuick,  valsTVQuick,  color=quickCOL,  linewidth=LW, marker=quickMRK,  markersize=MS, linestyle=quickLS,  label=quickHS + "(" + str(int(rate)) + ")")
-#                     if runComb and len(payloadsTVComb) > 0:
-#                         if barPlot:
-#                             payloadsTVComb = [x+posT for x in payloadsTVComb]
-#                             axs[0].bar(payloadsTVComb,   valsTVComb, width=width,   color=combCOL,   linewidth=LW, linestyle=combLS,   label=combHS + "(" + str(int(rate)) + ")")
-#                             posT += width
-#                             for (i,j) in zip(payloadsTVComb, valsTVComb):
-#                                 f = open("points","a")
-#                                 f.write("throughput " + str(int(rate)) + " " + str(i) + " " + str(j) + "\n")
-#                                 f.close()
-#                         else:
-#                             axs[0].plot(payloadsTVComb,   valsTVComb,   color=combCOL,   linewidth=LW, marker=combMRK,   markersize=MS, linestyle=combLS,   label=combHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsTVFree) > 0:
-#                         axs[0].plot(payloadsTVFree,   valsTVFree,   color=freeCOL,   linewidth=LW, marker=freeMRK,   markersize=MS, linestyle=freeLS,   label=freeHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsTVOnep) > 0:
-#                         axs[0].plot(payloadsTVOnep,   valsTVOnep,   color=onepCOL,   linewidth=LW, marker=onepMRK,   markersize=MS, linestyle=onepLS,   label=onepHS + "(" + str(int(rate)) + ")")
-#                 if plotChained:
-#                     if len(payloadsTVChBase) > 0:
-#                         axs[0].plot(payloadsTVChBase, valsTVChBase, color=baseChCOL, linewidth=LW, marker=baseChMRK, markersize=MS, linestyle=baseChLS, label=baseChHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsTVChComb) > 0:
-#                         axs[0].plot(payloadsTVChComb, valsTVChComb, color=combChCOL, linewidth=LW, marker=combChMRK, markersize=MS, linestyle=combChLS, label=combChHS + "(" + str(int(rate)) + ")")
-#                 if debugPlot:
-#                     if plotBasic:
-#                         for x,y,z in zip(payloadsTVBase, valsTVBase, numsTVBase):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsTVCheap, valsTVCheap, numsTVCheap):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsTVQuick, valsTVQuick, numsTVQuick):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsTVComb, valsTVComb, numsTVComb):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsTVFree, valsTVFree, numsTVFree):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsTVOnep, valsTVOnep, numsTVOnep):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     if plotChained:
-#                         for x,y,z in zip(payloadsTVChBase, valsTVChBase, numsTVChBase):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsTVChComb, valsTVChComb, numsTVChComb):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-
-#         # legend
-#         if showLegend1:
-#             axs[0].legend(ncol=2,prop={'size': 9})
-
-#     if plotLatency:
-#         ax=axs[0]
-#         if plotThroughput:
-#             ax=axs[1]
-#         # naming the x/y axis
-#         if showYlabel:
-#             if plotHandle and not plotView:
-#                 ax.set(xlabel="payload size", ylabel="handling time (ms)")
-#             else:
-#                 ax.set(xlabel="payload size", ylabel="latency (ms)")
+#             pass
+#         # ------
+#         # Quick-HotStuff (Accumulator) - debug version
+#         if runQuickDbg:
+#             computeAvgStats(recompile,protocol=Protocol.QUICKDBG,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=2*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
 #         else:
-#             ax.set(xlabel="payload size")
-#         if logScale:
-#             ax.set_yscale('log')
-#         if whichExp == "EUexp1":
-#             ax.set_yticks((5,100,600))
-#             ax.set_ylim([5,600])
-#             ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-#         elif whichExp == "ALLexp1":
-#             ax.set_yticks((60,100,1000))
-#             ax.set_ylim([60,1000])
-#             ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-#         # giving a title to my graph
-#         #ax.set_title("latencies")
-#         # plotting the points
+#             pass
+#         # ------
+#         # Combines Cheap&Quick-HotStuff
+#         if runComb:
+#             computeAvgStats(recompile,protocol=Protocol.COMB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
+#         # ------
+#         # Free
+#         if runFree:
+#             computeAvgStats(recompile,protocol=Protocol.FREE,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
+#         # ------
+#         # Onep
+#         if runOnep:
+#             computeAvgStats(recompile,protocol=Protocol.ONEP,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
+#         # ------
+#         # OnepB
+#         if runOnepB:
+#             computeAvgStats(recompile,protocol=Protocol.ONEPB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
+#         # ------
+#         # OnepC
+#         if runOnepC:
+#             computeAvgStats(recompile,protocol=Protocol.ONEPC,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
+#         # ------
+#         # OnepD
+#         if runOnepD:
+#             computeAvgStats(recompile,protocol=Protocol.ONEPD,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
+#         # ------
+#         # Chained HotStuff-like baseline
+#         if runChBase:
+#             computeAvgStats(recompile,protocol=Protocol.CHBASE,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=2*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
+#         # ------
+#         # Chained Cheap&Quick
+#         if runChComb:
+#             computeAvgStats(recompile,protocol=Protocol.CHCOMB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
+#         # ------
+#         # Chained Cheap&Quick - debug version
+#         if runChCombDbg:
+#             computeAvgStats(recompile,protocol=Protocol.CHCOMBDBG,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+#         else:
+#             pass
 
-#         for file in files:
-#             (rate,
-#              # throughput-view
-#              payloadsTVBase,   valsTVBase,   numsTVBase,
-#              payloadsTVCheap,  valsTVCheap,  numsTVCheap,
-#              payloadsTVQuick,  valsTVQuick,  numsTVQuick,
-#              payloadsTVComb,   valsTVComb,   numsTVComb,
-#              payloadsTVFree,   valsTVFree,   numsTVFree,
-#              payloadsTVOnep,   valsTVOnep,   numsTVOnep,
-#              payloadsTVChBase, valsTVChBase, numsTVChBase,
-#              payloadsTVChComb, valsTVChComb, numsTVChComb,
-#              # latency-view
-#              payloadsLVBase,   valsLVBase,   numsLVBase,
-#              payloadsLVCheap,  valsLVCheap,  numsLVCheap,
-#              payloadsLVQuick,  valsLVQuick,  numsLVQuick,
-#              payloadsLVComb,   valsLVComb,   numsLVComb,
-#              payloadsLVFree,   valsLVFree,   numsLVFree,
-#              payloadsLVOnep,   valsLVOnep,   numsLVOnep,
-#              payloadsLVChBase, valsLVChBase, numsLVChBase,
-#              payloadsLVChComb, valsLVChComb, numsLVChComb,
-#              # handle
-#              payloadsHBase,   valsHBase,   numsHBase,
-#              payloadsHCheap,  valsHCheap,  numsHCheap,
-#              payloadsHQuick,  valsHQuick,  numsHQuick,
-#              payloadsHComb,   valsHComb,   numsHComb,
-#              payloadsHFree,   valsHFree,   numsHFree,
-#              payloadsHOnep,   valsHOnep,   numsHOnep,
-#              payloadsHChBase, valsHChBase, numsHChBase,
-#              payloadsHChComb, valsHChComb, numsHChComb,
-#              # crypto-sign
-#              payloadsCSBase,   valsCSBase,   numsCSBase,
-#              payloadsCSCheap,  valsCSCheap,  numsCSCheap,
-#              payloadsCSQuick,  valsCSQuick,  numsCSQuick,
-#              payloadsCSComb,   valsCSComb,   numsCSComb,
-#              payloadsCSFree,   valsCSFree,   numsCSFree,
-#              payloadsCSOnep,   valsCSOnep,   numsCSOnep,
-#              payloadsCSChBase, valsCSChBase, numsCSChBase,
-#              payloadsCSChComb, valsCSChComb, numsCSChComb,
-#              # crypto-verif
-#              payloadsCVBase,   valsCVBase,   numsCVBase,
-#              payloadsCVCheap,  valsCVCheap,  numsCVCheap,
-#              payloadsCVQuick,  valsCVQuick,  numsCVQuick,
-#              payloadsCVComb,   valsCVComb,   numsCVComb,
-#              payloadsCVFree,   valsCVFree,   numsCVFree,
-#              payloadsCVOnep,   valsCVOnep,   numsCVOnep,
-#              payloadsCVChBase, valsCVChBase, numsCVChBase,
-#              payloadsCVChComb, valsCVChComb, numsCVChComb) = createPlotPayloadAux(file)
+#     print("num complete runs=", completeRuns)
+#     print("num aborted runs=", abortedRuns)
+#     print("aborted runs:", aborted)
 
-#             if rate == 10:
-#                 baseCOL = "black"
-#                 combCOL = "red"
-#             if rate == 100:
-#                 baseCOL = "orange"
-#                 combCOL = "blue"
-#             if rate == 1000:
-#                 baseCOL = "purple"
-#                 combCOL = "green"
-
-#             if plotView:
-#                 if plotBasic:
-#                     if runBase and len(payloadsLVBase) > 0:
-#                         if barPlot:
-#                             payloadsLVBase2 = [x+posL for x in payloadsLVBase]
-#                             ax.bar(payloadsLVBase2,   valsLVBase, width=width,   color=baseCOL,   linewidth=LW, linestyle=baseLS,   label=baseHS + "(" + str(int(rate)) + ")")
-#                             posL += width
-#                             for (i,j) in zip(payloadsLVBase, valsLVBase):
-#                                 f = open("points","a")
-#                                 f.write("latency " + str(int(rate)) + " " + str(i) + " " + str(j) + "\n")
-#                                 f.close()
-#                         else:
-#                             ax.plot(payloadsLVBase,   valsLVBase,   color=baseCOL,   linewidth=LW, marker=baseMRK,   markersize=MS, linestyle=baseLS,   label=baseHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsLVCheap) > 0:
-#                         ax.plot(payloadsLVCheap,  valsLVCheap,  color=cheapCOL,  linewidth=LW, marker=cheapMRK,  markersize=MS, linestyle=cheapLS,  label=cheapHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsLVQuick) > 0:
-#                         ax.plot(payloadsLVQuick,  valsLVQuick,  color=quickCOL,  linewidth=LW, marker=quickMRK,  markersize=MS, linestyle=quickLS,  label=quickHS + "(" + str(int(rate)) + ")")
-#                     if runComb and len(payloadsLVComb) > 0:
-#                         if barPlot:
-#                             payloadsLVComb = [x+posL for x in payloadsLVComb]
-#                             ax.bar(payloadsLVComb,   valsLVComb, width=width,   color=combCOL,   linewidth=LW, linestyle=combLS,   label=combHS + "(" + str(int(rate)) + ")")
-#                             posL += width
-#                             for (i,j) in zip(payloadsLVComb, valsLVComb):
-#                                 f = open("points","a")
-#                                 f.write("latency " + str(int(rate)) + " " + str(i) + " " + str(j) + "\n")
-#                                 f.close()
-#                         else:
-#                             ax.plot(payloadsLVComb,   valsLVComb,   color=combCOL,   linewidth=LW, marker=combMRK,   markersize=MS, linestyle=combLS,   label=combHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsLVFree) > 0:
-#                         ax.plot(payloadsLVFree,   valsLVFree,   color=freeCOL,   linewidth=LW, marker=freeMRK,   markersize=MS, linestyle=freeLS,   label=freeHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsLVOnep) > 0:
-#                         ax.plot(payloadsLVOnep,   valsLVOnep,   color=onepCOL,   linewidth=LW, marker=onepMRK,   markersize=MS, linestyle=onepLS,   label=onepHS + "(" + str(int(rate)) + ")")
-#                 if plotChained:
-#                     if len(payloadsLVChBase) > 0:
-#                         ax.plot(payloadsLVChBase, valsLVChBase, color=baseChCOL, linewidth=LW, marker=baseChMRK, markersize=MS, linestyle=baseChLS, label=baseChHS + "(" + str(int(rate)) + ")")
-#                     if len(payloadsLVChComb) > 0:
-#                         ax.plot(payloadsLVChComb, valsLVChComb, color=combChCOL, linewidth=LW, marker=combChMRK, markersize=MS, linestyle=combChLS, label=combChHS + "(" + str(int(rate)) + ")")
-#                 if debugPlot:
-#                     if plotBasic:
-#                         for x,y,z in zip(payloadsLVBase, valsLVBase, numsLVBase):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsLVCheap, valsLVCheap, numsLVCheap):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsLVQuick, valsLVQuick, numsLVQuick):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsLVComb, valsLVComb, numsLVComb):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsLVFree, valsLVFree, numsLVFree):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsLVOnep, valsLVOnep, numsLVOnep):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     if plotChained:
-#                         for x,y,z in zip(payloadsLVChBase, valsLVChBase, numsLVChBase):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsLVChComb, valsLVChComb, numsLVChComb):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#             if plotHandle:
-#                 if plotBasic:
-#                     if len(payloadsHBase) > 0:
-#                         ax.plot(payloadsHBase,   valsHBase,   color=baseCOL,   linewidth=LW, marker="+", markersize=MS, linestyle=baseLS,   label=baseHS + "(" + str(int(rate)) + ")"+"")
-#                     if len(payloadsHCheap) > 0:
-#                         ax.plot(payloadsHCheap,  valsHCheap,  color=cheapCOL,  linewidth=LW, marker="+", markersize=MS, linestyle=cheapLS,  label=cheapHS + "(" + str(int(rate)) + ")"+"")
-#                     if len(payloadsHQuick) > 0:
-#                         ax.plot(payloadsHQuick,  valsHQuick,  color=quickCOL,  linewidth=LW, marker="+", markersize=MS, linestyle=quickLS,  label=quickHS + "(" + str(int(rate)) + ")"+"")
-#                     if len(payloadsHComb) > 0:
-#                         ax.plot(payloadsHComb,   valsHComb,   color=combCOL,   linewidth=LW, marker="+", markersize=MS, linestyle=combLS,   label=combHS + "(" + str(int(rate)) + ")"+"")
-#                     if len(payloadsHFree) > 0:
-#                         ax.plot(payloadsHFree,   valsHFree,   color=freeCOL,   linewidth=LW, marker="+", markersize=MS, linestyle=freeLS,   label=freeHS + "(" + str(int(rate)) + ")"+"")
-#                     if len(payloadsHOnep) > 0:
-#                         ax.plot(payloadsHOnep,   valsHOnep,   color=onepCOL,   linewidth=LW, marker="+", markersize=MS, linestyle=onepLS,   label=onepHS + "(" + str(int(rate)) + ")"+"")
-#                 if plotChained:
-#                     if len(payloadsHChBase) > 0:
-#                         ax.plot(payloadsHChBase, valsHChBase, color=baseChCOL, linewidth=LW, marker="+", markersize=MS, linestyle=baseChLS, label=baseChHS + "(" + str(int(rate)) + ")"+"")
-#                     if len(payloadsHChComb) > 0:
-#                         ax.plot(payloadsHChComb, valsHChComb, color=combChCOL, linewidth=LW, marker="+", markersize=MS, linestyle=combChLS, label=combChHS + "(" + str(int(rate)) + ")"+"")
-#                 if debugPlot:
-#                     if plotBasic:
-#                         for x,y,z in zip(payloadsHBase, valsHBase, numsHBase):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsHCheap, valsHCheap, numsHCheap):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsHQuick, valsHQuick, numsHQuick):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsHComb, valsHComb, numsHComb):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsHFree, valsHFree, numsHFree):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsHOnep, valsHOnep, numsHOnep):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     if plotChained:
-#                         for x,y,z in zip(payloadsHChBase, valsHChBase, numsHChBase):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsHChComb, valsHChComb, numsHChComb):
-#                             ax.annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#             if plotCrypto: # Sign
-#                 if plotBasic:
-#                     if len(payloadsCSBase) > 0:
-#                         axs[0].plot(payloadsCSBase,   valsCSBase,   color=baseCOL,   linewidth=LW, marker="1", markersize=MS, linestyle=baseLS,   label=baseHS + "(" + str(int(rate)) + ")"+" (crypto-sign)")
-#                     if len(payloadsCSCheap) > 0:
-#                         axs[0].plot(payloadsCSCheap,  valsCSCheap,  color=cheapCOL,  linewidth=LW, marker="1", markersize=MS, linestyle=cheapLS,  label=cheapHS + "(" + str(int(rate)) + ")"+" (crypto-sign)")
-#                     if len(payloadsCSQuick) > 0:
-#                         axs[0].plot(payloadsCSQuick,  valsCSQuick,  color=quickCOL,  linewidth=LW, marker="1", markersize=MS, linestyle=quickLS,  label=quickHS + "(" + str(int(rate)) + ")"+" (crypto-sign)")
-#                     if len(payloadsCSComb) > 0:
-#                         axs[0].plot(payloadsCSComb,   valsCSComb,   color=combCOL,   linewidth=LW, marker="1", markersize=MS, linestyle=combLS,   label=combHS + "(" + str(int(rate)) + ")"+" (crypto-sign)")
-#                     if len(payloadsCSFree) > 0:
-#                         axs[0].plot(payloadsCSFree,   valsCSFree,   color=freeCOL,   linewidth=LW, marker="1", markersize=MS, linestyle=freeLS,   label=freeHS + "(" + str(int(rate)) + ")"+" (crypto-sign)")
-#                     if len(payloadsCSOnep) > 0:
-#                         axs[0].plot(payloadsCSOnep,   valsCSOnep,   color=onepCOL,   linewidth=LW, marker="1", markersize=MS, linestyle=onepLS,   label=onepHS + "(" + str(int(rate)) + ")"+" (crypto-sign)")
-#                 if plotChained:
-#                     if len(payloadsCSChBase) > 0:
-#                         axs[0].plot(payloadsCSChBase, valsCSChBase, color=baseChCOL, linewidth=LW, marker="1", markersize=MS, linestyle=baseChLS, label=baseChHS + "(" + str(int(rate)) + ")"+" (crypto-sign)")
-#                     if len(payloadsCSChComb) > 0:
-#                         axs[0].plot(payloadsCSChComb, valsCSChComb, color=combChCOL, linewidth=LW, marker="1", markersize=MS, linestyle=combChLS, label=combChHS + "(" + str(int(rate)) + ")"+" (crypto-sign)")
-#                 if debugPlot:
-#                     if plotBasic:
-#                         for x,y,z in zip(payloadsCSBase, valsCSBase, numsCSBase):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCSCheap, valsCSCheap, numsCSCheap):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCSQuick, valsCSQuick, numsCSQuick):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCCSomb, valsCSComb, numsCSComb):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCSFree, valsCSFree, numsCSFree):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCSOnep, valsCSOnep, numsCSOnep):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     if plotChained:
-#                         for x,y,z in zip(payloadsCSChBase, valsCSChBase, numsCSChBase):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCSChComb, valsCSChComb, numsCSChComb):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#             if plotCrypto: # Verif
-#                 if plotBasic:
-#                     if len(payloadsCVBase) > 0:
-#                         axs[0].plot(payloadsCVBase,   valsCVBase,   color=baseCOL,   linewidth=LW, marker="2", markersize=MS, linestyle=baseLS,   label=baseHS + "(" + str(int(rate)) + ")"+" (crypto-verif)")
-#                     if len(payloadsCVCheap) > 0:
-#                         axs[0].plot(payloadsCVCheap,  valsCVCheap,  color=cheapCOL,  linewidth=LW, marker="2", markersize=MS, linestyle=cheapLS,  label=cheapHS + "(" + str(int(rate)) + ")"+" (crypto-verif)")
-#                     if len(payloadsCVQuick) > 0:
-#                         axs[0].plot(payloadsCVQuick,  valsCVQuick,  color=quickCOL,  linewidth=LW, marker="2", markersize=MS, linestyle=quickLS,  label=quickHS + "(" + str(int(rate)) + ")"+" (crypto-verif)")
-#                     if len(payloadsCVComb) > 0:
-#                         axs[0].plot(payloadsCVComb,   valsCVComb,   color=combCOL,   linewidth=LW, marker="2", markersize=MS, linestyle=combLS,   label=combHS + "(" + str(int(rate)) + ")"+" (crypto-verif)")
-#                     if len(payloadsCVFree) > 0:
-#                         axs[0].plot(payloadsCVFree,   valsCVFree,   color=freeCOL,   linewidth=LW, marker="2", markersize=MS, linestyle=freeLS,   label=freeHS + "(" + str(int(rate)) + ")"+" (crypto-verif)")
-#                     if len(payloadsCVOnep) > 0:
-#                         axs[0].plot(payloadsCVOnep,   valsCVOnep,   color=onepCOL,   linewidth=LW, marker="2", markersize=MS, linestyle=onepLS,   label=onepHS + "(" + str(int(rate)) + ")"+" (crypto-verif)")
-#                 if plotChained:
-#                     if len(payloadsCVChBase) > 0:
-#                         axs[0].plot(payloadsCVChBase, valsCVChBase, color=baseChCOL, linewidth=LW, marker="2", markersize=MS, linestyle=baseChLS, label=baseChHS + "(" + str(int(rate)) + ")"+" (crypto-verif)")
-#                     if len(payloadsCVChComb) > 0:
-#                         axs[0].plot(payloadsCVChComb, valsCVChComb, color=combChCOL, linewidth=LW, marker="2", markersize=MS, linestyle=combChLS, label=combChHS + "(" + str(int(rate)) + ")"+" (crypto-verif)")
-#                 if debugPlot:
-#                     if plotBasic:
-#                         for x,y,z in zip(payloadsCVBase, valsCVBase, numsCVBase):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCVCheap, valsCVCheap, numsCVCheap):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCVQuick, valsCVQuick, numsCVQuick):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCCVomb, valsCVComb, numsCVComb):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCVFree, valsCVFree, numsCVFree):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCVOnep, valsCVOnep, numsCVOnep):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                     if plotChained:
-#                         for x,y,z in zip(payloadsCVChBase, valsCVChBase, numsCVChBase):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#                         for x,y,z in zip(payloadsCVChComb, valsCVChComb, numsCVChComb):
-#                             axs[0].annotate(z,(x,y),textcoords="offset points",xytext=XYT,ha='center')
-#         # legend
-#         if showLegend2 or (showLegend1 and not plotThroughput):
-#             ax.legend(prop={'size': 9})
-
-#     #fig.subplots_adjust(hspace=0.5)
-#     fig.savefig(plotFile, bbox_inches='tight', pad_inches=0.05)
-#     print("points are in", files)
-#     print("plot is in", plotFile)
-#     if displayPlot:
-#         try:
-#             subprocess.call([displayApp, plotFile])
-#         except:
-#             print("couldn't display the plot using '" + displayApp + "'. Consider changing the 'displayApp' variable.")
-# # End of createPlotPayload
-
-
-## Run experiments so that all protocols use the same number of nodes, and we vary the number of faults
-## numFaults is used as the basis to compute the actual number of faults: 2* or 3* depending on the protocol
-def runExperimentsFaults(numFaults):
-    # Creating stats directory
-    Path(statsdir).mkdir(parents=True, exist_ok=True)
-
-    printNodePointParams()
-
-    l = range(2*numFaults+1)
-    print("will test the following numbers of dead nodes: ", l)
-
-    for numDeadNodes in l: # i.e., from 0 to numFaults
-        # ------
-        # HotStuff-like baseline
-        if runBase:
-            computeAvgStats(recompile,protocol=Protocol.BASE,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=2*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Cheap-HotStuff (TEE locked/prepared blocks)
-        if runCheap:
-            computeAvgStats(recompile,protocol=Protocol.CHEAP,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Quick-HotStuff (Accumulator)
-        if runQuick:
-            computeAvgStats(recompile,protocol=Protocol.QUICK,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=2*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Quick-HotStuff (Accumulator) - debug version
-        if runQuickDbg:
-            computeAvgStats(recompile,protocol=Protocol.QUICKDBG,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=2*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Combines Cheap&Quick-HotStuff
-        if runComb:
-            computeAvgStats(recompile,protocol=Protocol.COMB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Free
-        if runFree:
-            computeAvgStats(recompile,protocol=Protocol.FREE,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Onep
-        if runOnep:
-            computeAvgStats(recompile,protocol=Protocol.ONEP,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # OnepB
-        if runOnepB:
-            computeAvgStats(recompile,protocol=Protocol.ONEPB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # OnepC
-        if runOnepC:
-            computeAvgStats(recompile,protocol=Protocol.ONEPC,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # OnepD
-        if runOnepD:
-            computeAvgStats(recompile,protocol=Protocol.ONEPD,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Chained HotStuff-like baseline
-        if runChBase:
-            computeAvgStats(recompile,protocol=Protocol.CHBASE,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=2*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Chained Cheap&Quick
-        if runChComb:
-            computeAvgStats(recompile,protocol=Protocol.CHCOMB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-        # ------
-        # Chained Cheap&Quick - debug version
-        if runChCombDbg:
-            computeAvgStats(recompile,protocol=Protocol.CHCOMBDBG,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=3*numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
-        else:
-            pass
-
-    print("num complete runs=", completeRuns)
-    print("num aborted runs=", abortedRuns)
-    print("aborted runs:", aborted)
-
-    # createPlot(pointsFile)
-# End of runExperiments
+#     # createPlot(pointsFile)
+# # End of runExperiments
 
 
 def runExperiments():
@@ -3918,79 +2200,79 @@ def runExperiments():
         # ------
         # HotStuff-like baseline
         if runBase:
-            computeAvgStats(recompile,protocol=Protocol.BASE,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.BASE,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Cheap-HotStuff (TEE locked/prepared blocks)
         if runCheap:
-            computeAvgStats(recompile,protocol=Protocol.CHEAP,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.CHEAP,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Quick-HotStuff (Accumulator)
         if runQuick:
-            computeAvgStats(recompile,protocol=Protocol.QUICK,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.QUICK,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Quick-HotStuff (Accumulator) - debug version
         if runQuickDbg:
-            computeAvgStats(recompile,protocol=Protocol.QUICKDBG,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.QUICKDBG,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Combines Cheap&Quick-HotStuff
         if runComb:
-            computeAvgStats(recompile,protocol=Protocol.COMB,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.COMB,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Free
         if runFree:
-            computeAvgStats(recompile,protocol=Protocol.FREE,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.FREE,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Onep
         if runOnep:
-            computeAvgStats(recompile,protocol=Protocol.ONEP,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.ONEP,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # OnepB
         if runOnepB:
-            computeAvgStats(recompile,protocol=Protocol.ONEPB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.ONEPB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # OnepC
         if runOnepC:
-            computeAvgStats(recompile,protocol=Protocol.ONEPC,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.ONEPC,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # OnepD
         if runOnepD:
-            computeAvgStats(recompile,protocol=Protocol.ONEPD,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.ONEPD,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Chained HotStuff-like baseline
         if runChBase:
-            computeAvgStats(recompile,protocol=Protocol.CHBASE,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.CHBASE,constFactor=3,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Chained Cheap&Quick
         if runChComb:
-            computeAvgStats(recompile,protocol=Protocol.CHCOMB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.CHCOMB,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
         # ------
         # Chained Cheap&Quick - debug version
         if runChCombDbg:
-            computeAvgStats(recompile,protocol=Protocol.CHCOMBDBG,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats)
+            computeAvgStats(recompile,protocol=Protocol.CHCOMBDBG,constFactor=2,numClTrans=numClTrans,sleepTime=sleepTime,numViews=numViews,cutOffBound=cutOffBound,numFaults=numFaults,numDeadNodes=numDeadNodes,numRepeats=repeats, totaltee=totalTEE)
         else:
             pass
 
@@ -4264,11 +2546,16 @@ def createTVLplot(cFile,instances):
 # Enf of createTVLplot
 
 
-def oneTVL(protocol,constFactor,numFaults,numTransPerBlock,payloadSize,numClTrans,numViews,cutOffBound,sleepTimes,repeats):
+def oneTVL(protocol,constFactor,numFaults,numTransPerBlock,payloadSize,numClTrans,numViews,cutOffBound,sleepTimes,repeats,totaltee=None):
     numReps = (constFactor * numFaults) + 1
 
     if runDocker:
         startContainers(numReps,numClients)
+
+    # If totaltee is not specified, default to all nodes being TEE
+    if totaltee is None:
+        actualReps = numReps - numDeadNodes if deadNodes else numReps
+        totaltee = actualReps
 
     mkApp(protocol,constFactor,numFaults,numTransPerBlock,payloadSize)
     for sleepTime in sleepTimes:
@@ -4283,7 +2570,7 @@ def oneTVL(protocol,constFactor,numFaults,numTransPerBlock,payloadSize,numClTran
                   "#faults="+str(numFaults),
                   "repeat="+str(i))
             time.sleep(2)
-            execute(protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFaults,numDeadNodes,i)
+            execute(protocol,constFactor,numClTrans,sleepTime,numViews,cutOffBound,numFaults,numDeadNodes,i,totaltee)
         computeClientStats(protocol,numClTrans,sleepTime,numFaults)
 
     if runDocker:
@@ -5107,6 +3394,7 @@ parser.add_argument("--repeats2",   type=int, default=0,   help="number of repea
 parser.add_argument("--faults",     type=str, default="",  help="the number of faults to test, separated by commas: 1,2,3,etc.")
 parser.add_argument("--test",       action="store_true",   help="to stop after checking the arguments")
 parser.add_argument("--payload",    type=int, default=0,   help="size of payloads in Bytes")
+parser.add_argument("--totaltee",   type=int, default=0,   help="number of TEE nodes")
 parser.add_argument("--p1",         action="store_true",   help="sets runBase to True (base protocol, i.e., HotStuff)")
 parser.add_argument("--p2",         action="store_true",   help="sets runCheap to True (Damysus-C)")
 parser.add_argument("--p3",         action="store_true",   help="sets runQuick to True (Damysus-A)")
@@ -5221,6 +3509,9 @@ if args.payload >= 0:
     payloadSize = args.payload
     print("SUCCESSFULLY PARSED ARGUMENT - the payload size will be:", payloadSize)
 
+if args.totaltee >= 0:
+    totalTEE = args.totaltee
+    print("SUCCESSFULLY PARSED ARGUMENT - the total number of TEE nodes will be:", totalTEE)
 
 if args.docker:
     runDocker = True

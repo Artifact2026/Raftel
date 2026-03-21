@@ -30,7 +30,12 @@ Transaction::Transaction(CID clientid, TID transid, char c) {
 
 CID Transaction::getCid() { return this->clientid; }
 TID Transaction::getTid() { return this->transid;  }
-unsigned char* Transaction::getData() { return &(this->data[0]); }
+unsigned char* Transaction::getData() {
+  // PAYLOAD_SIZE can be 0 for payload-less experiments. Avoid taking &data[0]
+  // when the underlying array has size 0.
+  if (PAYLOAD_SIZE == 0) { return nullptr; }
+  return &(this->data[0]);
+}
 
 
 std::string Transaction::toString() const {

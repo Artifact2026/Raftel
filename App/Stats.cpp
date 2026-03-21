@@ -162,6 +162,7 @@ double Stats::getExecTimeAvg() {
       total += std::chrono::duration_cast<std::chrono::microseconds>(std::get<2>(p) - std::get<1>(p)).count();
     }
   }
+  if (i == 0) { return 0.0; }
   return (total / i);
 }
 
@@ -202,17 +203,21 @@ void Stats::printAllTimes() {
 
 std::string Stats::toString() {
     std::ostringstream os;
+    // execViews can be 0 if we stop before any completed view.
+    // Avoid dividing by 0 in debug/stat output.
+    double execViews = static_cast<double>(this->execViews);
+    double execViewsSafe = (execViews > 0.0) ? execViews : 1.0;
     os << "[id="              << this->id
        << ";execViews="       << this->execViews
        << ";#timeouts="       << this->timeouts
        << ";#numonepbs="      << this->numonepbs
        << ";#numonepcs="      << this->numonepcs
-       << ";TEEverify="       << this->TEEverify/this->execViews
-       << ";TEEsign="         << this->TEEsign/this->execViews
-       << ";TEEprepare="      << this->TEEprepare/this->execViews
-       << ";TEEstore="        << this->TEEstore/this->execViews
-       << ";TEEaccum="        << this->TEEaccum/this->execViews
-       << ";TEEtime="         << this->TEEtime/this->execViews
+       << ";TEEverify="       << ((execViews > 0.0) ? (this->TEEverify / execViewsSafe) : 0.0)
+       << ";TEEsign="         << ((execViews > 0.0) ? (this->TEEsign / execViewsSafe) : 0.0)
+       << ";TEEprepare="      << ((execViews > 0.0) ? (this->TEEprepare / execViewsSafe) : 0.0)
+       << ";TEEstore="        << ((execViews > 0.0) ? (this->TEEstore / execViewsSafe) : 0.0)
+       << ";TEEaccum="        << ((execViews > 0.0) ? (this->TEEaccum / execViewsSafe) : 0.0)
+       << ";TEEtime="         << ((execViews > 0.0) ? (this->TEEtime / execViewsSafe) : 0.0)
 //       << ";totalLPrepTime="  << this->totalLPrepTime/this->execViews
 //       << ";totalBPrepTime="  << this->totalBPrepTime/this->execViews
 //       << ";totalLVoteTime="  << this->totalLVoteTime/this->execViews
@@ -225,8 +230,8 @@ std::string Stats::toString() {
        << ";cryptoVerifNum="  << this->cryptoVerifNum
        << ";cryptoSignTime="  << this->cryptoSignTime
        << ";cryptoVerifTime=" << this->cryptoVerifTime
-       << ";totalHandleTime=" << this->totalHandleTime/this->execViews
-       << ";totalViewTime="   << this->totalViewTime/this->execViews
+       << ";totalHandleTime=" << ((execViews > 0.0) ? (this->totalHandleTime / execViewsSafe) : 0.0)
+       << ";totalViewTime="   << ((execViews > 0.0) ? (this->totalViewTime / execViewsSafe) : 0.0)
        << "]";
     return os.str();
 }

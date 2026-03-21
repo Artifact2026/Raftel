@@ -22,6 +22,9 @@
 #include <openssl/rand.h>
 
 #include "Handler.h"
+#if defined(BASIC_HYBRID_TEE)
+#include "TrustedComb.h"
+#endif
 
 
 // To stop the processes once they have delivered enough messages
@@ -50,8 +53,12 @@ std::uniform_int_distribution<int>  distr(0, 1);
 std::string Handler::nfo() { return "[" + std::to_string(this->myid) + "]{" +  std::to_string(this->view) + "}"; }
 
 
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
 // These versions use trusted components
+#if defined(BASIC_HYBRID_TEE)
+// Hybrid mode also needs a non-enclave trusted path for non-TEE replicas.
+TrustedComb tc;
+#endif
 #else
 // Trusted Component (would have to be executed in a TEE):
 TrustedFun tf;
@@ -412,7 +419,9 @@ void setJBlock(JBlock block, jblock_t *b) {
     Transaction *t = block.getTransactions();
     b->trans[i].clientid=t[i].getCid();
     b->trans[i].transid=t[i].getTid();
-    memcpy(b->trans[i].data,t[i].getData(),PAYLOAD_SIZE);
+    if (PAYLOAD_SIZE > 0) {
+      memcpy(b->trans[i].data,t[i].getData(),PAYLOAD_SIZE);
+    }
   }
 }
 
@@ -439,7 +448,9 @@ void setCBlock(CBlock block, cblock_t *b) {
     b->trans[i].clientid=t[i].getCid();
     b->trans[i].transid=t[i].getTid();
     //for (int j = 0; j < PAYLOAD_SIZE; j++) { (b->trans[i].data)[j] = (t[i].getData())[j]; }
-    memcpy(b->trans[i].data,t[i].getData(),PAYLOAD_SIZE);
+    if (PAYLOAD_SIZE > 0) {
+      memcpy(b->trans[i].data,t[i].getData(),PAYLOAD_SIZE);
+    }
   }
 }
 // ------------------------------------
@@ -449,7 +460,7 @@ void setCBlock(CBlock block, cblock_t *b) {
 
 // ------------------------------------
 // SGX related stuff
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
 /* Global EID shared by multiple threads */
 sgx_enclave_id_t global_eid = 0;
 
@@ -520,13 +531,7 @@ int Handler::initializeSGX() {
   }
 
   sgx_status_t ret, status;
-#if defined(BASIC_FREE)
-  status = FREE_initialize_variables(global_eid, &ret, &(this->myid), &(this->qsize));
-#elif defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
-  status = OP_initialize_variables(global_eid, &ret, &(this->myid), &(this->qsize));
-#else
   status = initialize_variables(global_eid, &ret, &(this->myid), &others, &(this->qsize), &(this->tqsize), &enc_nodes);
-#endif
   if (DEBUG1) std::cout << KBLU << nfo() << "enclave variables are initialized" << KNRM << std::endl;
 
   return 0;
@@ -538,22 +543,9 @@ int Handler::initializeSGX() {
 
 void Handler::startNewViewOnTimeout() {
   // TODO: start a new-view
-#if defined(BASIC_BASELINE)
-  if (DEBUG0) std::cout << KMAG << nfo() << "starting a new view" << KNRM << std::endl;
-  startNewView();
-#elif defined (BASIC_CHEAP)
-  startNewView();
-#elif defined (BASIC_QUICK)
-  startNewViewAcc();
-#elif defined (BASIC_HYBRID_TEE)
+#if defined (BASIC_HYBRID_TEE) || defined (BASIC_HYBRID_TEE_DEBUG)
   startNewViewComb();
-#elif defined (BASIC_FREE)
-  startNewViewFree();
-#elif defined (BASIC_ONEP) || defined (BASIC_ONEPB) || defined (BASIC_ONEPC) || defined (BASIC_ONEPD)
-  startNewViewOP();
-#elif defined (CHAINED_BASELINE)
-  startNewViewCh();
-#elif defined (CHAINED_CHEAP_AND_QUICK)
+#elif defined (CHAINED_CHEAP_AND_QUICK) || defined (CHAINED_CHEAP_AND_QUICK_DEBUG)
   startNewViewChComb();
 #else
   recordStats();
@@ -562,47 +554,16 @@ void Handler::startNewViewOnTimeout() {
 
 
 
-#if defined(BASIC_FREE)
-const uint8_t MsgNewViewFree::opcode;
-const uint8_t MsgLdrPrepareFree::opcode;
-const uint8_t MsgBckPrepareFree::opcode;
-const uint8_t MsgPrepareFree::opcode;
-const uint8_t MsgPreCommitFree::opcode;
-#elif defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
-const uint8_t MsgNewViewOPA::opcode;
-const uint8_t MsgNewViewOPB::opcode;
-const uint8_t MsgNewViewOPBB::opcode;
-const uint8_t MsgLdrPrepareOPA::opcode;
-const uint8_t MsgLdrPrepareOPB::opcode;
-const uint8_t MsgLdrPrepareOPC::opcode;
-const uint8_t MsgBckPrepareOP::opcode;
-//const uint8_t MsgPrepareOP::opcode;
-const uint8_t MsgPreCommitOP::opcode;
-const uint8_t MsgLdrAddOP::opcode;
-const uint8_t MsgBckAddOP::opcode;
-#elif defined(BASIC_HYBRID_TEE) || defined(BASIC_HYBRID_TEE_DEBUG)
+#if defined(BASIC_HYBRID_TEE) || defined(BASIC_HYBRID_TEE_DEBUG)
 const uint8_t MsgNewViewComb::opcode;
 const uint8_t MsgLdrPrepareComb::opcode;
 const uint8_t MsgPrepareComb::opcode;
-#elif defined(BASIC_QUICK) || defined(BASIC_QUICK_DEBUG)
-const uint8_t MsgNewViewAcc::opcode;
-const uint8_t MsgLdrPrepareAcc::opcode;
-const uint8_t MsgPrepareAcc::opcode;
-const uint8_t MsgPreCommitAcc::opcode;
-#elif defined(BASIC_CHEAP) || defined(BASIC_BASELINE)
-const uint8_t MsgNewView::opcode;
-const uint8_t MsgLdrPrepare::opcode;
-const uint8_t MsgPrepare::opcode;
-const uint8_t MsgPreCommit::opcode;
-const uint8_t MsgCommit::opcode;
-#elif defined(CHAINED_BASELINE)
-const uint8_t MsgNewViewCh::opcode;
-const uint8_t MsgLdrPrepareCh::opcode;
-const uint8_t MsgPrepareCh::opcode;
 #elif defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
 const uint8_t MsgNewViewChComb::opcode;
 const uint8_t MsgLdrPrepareChComb::opcode;
 const uint8_t MsgPrepareChComb::opcode;
+#else
+#error "Unsupported protocol macro for Handler opcodes"
 #endif
 
 const uint8_t MsgTransaction::opcode;
@@ -634,10 +595,14 @@ pnet(pec,pconf), cnet(cec,cconf) {
   if (DEBUG1) { std::cout << KBLU << nfo() << "qsize=" << this->qsize << "tqsize=" << this->tqsize << KNRM << std::endl; }
 
   // Trusted Functions
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   if (DEBUG0) { std::cout << KBLU << nfo() << "initializing TEE" << KNRM << std::endl; }
   initializeSGX();
   if (DEBUG0) { std::cout << KBLU << nfo() << "initialized TEE" << KNRM << std::endl; }
+#if defined(BASIC_HYBRID_TEE)
+  // Hybrid mode: non-TEE replicas execute comb logic outside enclave.
+  tc = TrustedComb(this->myid,this->priv,this->qsize, this->tqsize);
+#endif
 #else
   tf = TrustedFun(this->myid,this->priv,this->qsize);
   ta = TrustedAccum(this->myid,this->priv,this->qsize);
@@ -727,52 +692,18 @@ pnet(pec,pconf), cnet(cec,cconf) {
       }
     }
   }
-#if defined(BASIC_FREE)
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newviewfree,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrpreparefree, this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_bckpreparefree, this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_preparefree,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommitfree,  this, _1, _2));
-#elif defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newviewopa,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newviewopb,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newviewopbb,   this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommitop,   this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepareopa, this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepareopb, this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepareopc, this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_bckprepareop,  this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldraddop,      this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_bckaddop,      this, _1, _2));
-  /*this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_preparefree, this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommitfree, this, _1, _2));*/
-#elif defined(BASIC_HYBRID_TEE) || defined(BASIC_HYBRID_TEE_DEBUG)
+#if defined(BASIC_HYBRID_TEE) || defined(BASIC_HYBRID_TEE_DEBUG)
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newviewcomb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrpreparecomb, this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_preparecomb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommitcomb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_commitcomb,    this, _1, _2));
-#elif defined(BASIC_QUICK) || defined(BASIC_QUICK_DEBUG)
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newviewacc,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepareacc, this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepareacc,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommitacc,  this, _1, _2));
-#elif defined(BASIC_CHEAP) || defined(BASIC_BASELINE)
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newview,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepare,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepare, this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommit,  this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_commit,     this, _1, _2));
-#elif defined(CHAINED_BASELINE)
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newview_ch,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepare_ch,    this, _1, _2));
-  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepare_ch, this, _1, _2));
 #elif defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newview_ch_comb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepare_ch_comb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepare_ch_comb, this, _1, _2));
 #else
-  std::cout << KRED << nfo() << "TODO" << "(Handler)" << KNRM << std::endl;
+  #error "Unsupported protocol macro for Handler pnet handlers"
 #endif
 
   this->cnet.reg_handler(salticidae::generic_bind(&Handler::handle_transaction, this, _1, _2));
@@ -863,7 +794,12 @@ void Handler::printClientInfo() {
 }
 
 // leader rotation
-unsigned int Handler::getLeaderOf(View v) { return (v % this->totalTEE); }
+unsigned int Handler::getLeaderOf(View v) {
+  // In some experiment configurations we may have `totalTEE == 0` (no TEE nodes),
+  // but the hybrid protocol still calls this helper. Guard against modulo-by-zero.
+  if (this->totalTEE == 0) { return (v % this->total); }
+  return (v % this->totalTEE);
+}
 // unsigned int Handler::getLeaderOf(View v) { return (v % this->total); }
 // leader stable
 // unsigned int Handler::getLeaderOf(View v) { return (this->total-1);}
@@ -1181,11 +1117,10 @@ void Handler::sendMsgLdrPrepareChComb(MsgLdrPrepareChComb msg, Peers recipients)
 
 Just Handler::callTEEsign() {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   just_t jout;
   sgx_status_t ret;
-  sgx_status_t status = TEEsign(global_eid, &ret, &jout);
-  Just just = getJust(&jout);
+  Just just = callTEEsignComb();
 #else
   Just just = tf.TEEsign(stats);
 #endif
@@ -1199,15 +1134,14 @@ Just Handler::callTEEsign() {
 
 Just Handler::callTEEprepare(Hash h, Just j) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   just_t jout;
   just_t jin;
   setJust(j,&jin);
   hash_t hin;
   setHash(h,&hin);
   sgx_status_t ret;
-  sgx_status_t status = TEEprepare(global_eid, &ret, &hin, &jin, &jout);
-  Just just = getJust(&jout);
+  Just just = Just(); // legacy non-comb prepare removed in hybrid/chained-only build
 #else
   Just just = tf.TEEprepare(stats,this->nodes,h,j);
 #endif
@@ -1221,13 +1155,12 @@ Just Handler::callTEEprepare(Hash h, Just j) {
 
 Just Handler::callTEEstore(Just j) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   just_t jout;
   just_t jin;
   setJust(j,&jin);
   sgx_status_t ret;
-  sgx_status_t status = TEEstore(global_eid, &ret, &jin, &jout);
-  Just just = getJust(&jout);
+  Just just = callTEEstoreComb(j);
 #else
   Just just = tf.TEEstore(stats,this->nodes,j);
 #endif
@@ -1241,7 +1174,7 @@ Just Handler::callTEEstore(Just j) {
 
 /*bool Handler::callTEEverify(Just j) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE)
+#if defined(BASIC_HYBRID_TEE)
   unsigned int bout;
   just_t jin;
   setJust(j,&jin);
@@ -1261,16 +1194,13 @@ Just Handler::callTEEstore(Just j) {
 
 Accum Handler::callTEEaccum(Vote<Void,Cert> votes[MAX_NUM_SIGNATURES]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   accum_t aout;
   votes_t vin;
   setVotes(votes,&vin);
   sgx_status_t ret;
   if (DEBUG1) std::cout << KLBLU << nfo() << "calling TEEaccum" << KNRM << std::endl;
-  sgx_status_t status = TEEaccum(global_eid, &ret, &vin, &aout);
-  if (DEBUG1) std::cout << KLBLU << nfo() << "callied TEEaccum" << KNRM << std::endl;
-  Accum acc = getAccum(&aout);
-  if (DEBUG1) std::cout << KLBLU << nfo() << "accum built" << KNRM << std::endl;
+  Accum acc; // legacy non-comb accum removed in hybrid/chained-only build
 #else
   Accum acc = ta.TEEaccum(stats,this->nodes,votes);
 #endif
@@ -1285,11 +1215,10 @@ Accum Handler::callTEEaccum(Vote<Void,Cert> votes[MAX_NUM_SIGNATURES]) {
 // a simpler version of callTEEaccum for when all votes are for the same payload
 Accum Handler::callTEEaccumSp(uvote_t vote) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   accum_t aout;
   sgx_status_t ret;
-  sgx_status_t status = TEEaccumSp(global_eid, &ret, &vote, &aout);
-  Accum acc = getAccum(&aout);
+  Accum acc; // legacy non-comb accumSp removed in hybrid/chained-only build
 #else
   Accum acc = ta.TEEaccumSp(stats,this->nodes,vote);
 #endif
@@ -1301,15 +1230,31 @@ Accum Handler::callTEEaccumSp(uvote_t vote) {
 }
 
 
+
+//////////////// Hybrid version////////////////////////
 Accum Handler::callTEEaccumComb(Just justs[MAX_NUM_SIGNATURES]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE)
+  Accum acc;
+  if (this->nodeType) {
+    accum_t aout;
+    onejusts_t jin;
+    setOneJusts(justs,&jin);
+    sgx_status_t ret;
+    sgx_status_t status = COMB_TEEaccum(global_eid, &ret, &jin, &aout);
+    acc = getAccum(&aout);
+  } else {
+    acc = tc.TEEaccum(stats,this->nodes,justs);
+  }
+#else
   accum_t aout;
   onejusts_t jin;
   setOneJusts(justs,&jin);
   sgx_status_t ret;
   sgx_status_t status = COMB_TEEaccum(global_eid, &ret, &jin, &aout);
   Accum acc = getAccum(&aout);
+#endif
 #else
   Accum acc = tc.TEEaccum(stats,this->nodes,justs);
 #endif
@@ -1324,11 +1269,23 @@ Accum Handler::callTEEaccumComb(Just justs[MAX_NUM_SIGNATURES]) {
 Accum Handler::callTEEaccumCombSp(just_t just) {
   auto start = std::chrono::steady_clock::now();
   if (DEBUGH) std::cout << KRED << nfo() << "callTEEaccumCombSp" << KNRM << std::endl;
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE)
+  Accum acc;
+  if (this->nodeType) {
+    accum_t aout;
+    sgx_status_t ret;
+    sgx_status_t status = COMB_TEEaccumSp(global_eid, &ret, &just, &aout);
+    acc = getAccum(&aout);
+  } else {
+    acc = tc.TEEaccumSp(stats,this->nodes,just);
+  }
+#else
   accum_t aout;
   sgx_status_t ret;
   sgx_status_t status = COMB_TEEaccumSp(global_eid, &ret, &just, &aout);
   Accum acc = getAccum(&aout);
+#endif
 #else
   Accum acc = tc.TEEaccumSp(stats,this->nodes,just);
 #endif
@@ -1342,11 +1299,23 @@ Accum Handler::callTEEaccumCombSp(just_t just) {
 Just Handler::callTEEsignComb() {
   auto start = std::chrono::steady_clock::now();
   if (DEBUGH) std::cout << KRED << nfo() << "TEEaccumComb" << KNRM << std::endl;
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE)
+  Just just;
+  if (this->nodeType) {
+    just_t jout;
+    sgx_status_t ret;
+    sgx_status_t status = COMB_TEEsign(global_eid, &ret, &jout);
+    just = getJust(&jout);
+  } else {
+    just = tc.TEEsign();
+  }
+#else
   just_t jout;
   sgx_status_t ret;
   sgx_status_t status = COMB_TEEsign(global_eid, &ret, &jout);
   Just just = getJust(&jout);
+#endif
 #else
   Just just = tc.TEEsign();
 #endif
@@ -1360,7 +1329,23 @@ Just Handler::callTEEsignComb() {
 Just Handler::callTEEprepareComb(Hash h, Accum acc) {
   if (DEBUGH) std::cout << KRED << nfo() << "callTEEprepareComb" << KNRM << std::endl;
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE)
+  Just just;
+  if (this->nodeType) {
+    just_t jout;
+    accum_t ain;
+    setAccum(acc,&ain);
+    hash_t hin;
+    setHash(h,&hin);
+    sgx_status_t ret;
+    sgx_status_t status = COMB_TEEprepare(global_eid, &ret, &hin, &ain, &jout);
+    just = getJust(&jout);
+  } else {
+    just = tc.TEEprepare(stats,this->nodes,h,acc);
+  }
+  if (DEBUGH) std::cout << KRED << nfo() << "just: " << just.isSet() << KNRM << std::endl;
+#else
   just_t jout;
   accum_t ain;
   setAccum(acc,&ain);
@@ -1370,6 +1355,7 @@ Just Handler::callTEEprepareComb(Hash h, Accum acc) {
   sgx_status_t status = COMB_TEEprepare(global_eid, &ret, &hin, &ain, &jout);
   Just just = getJust(&jout);
   if (DEBUGH) std::cout << KRED << nfo() << "just: " << just.isSet() << KNRM << std::endl;
+#endif
 #else
   Just just = tc.TEEprepare(stats,this->nodes,h,acc);
 #endif
@@ -1383,13 +1369,27 @@ Just Handler::callTEEprepareComb(Hash h, Accum acc) {
 Just Handler::callTEEstoreComb(Just j) {
   auto start = std::chrono::steady_clock::now();
   if (DEBUGH) std::cout << KRED << nfo() << "callTEEstoreComb" << KNRM << std::endl;
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE)
+  Just just;
+  if (this->nodeType) {
+    just_t jout;
+    just_t jin;
+    setJust(j,&jin);
+    sgx_status_t ret;
+    sgx_status_t status = COMB_TEEstore(global_eid, &ret, &jin, &jout);
+    just = getJust(&jout);
+  } else {
+    just = tc.TEEstore(stats,this->nodes,j);
+  }
+#else
   just_t jout;
   just_t jin;
   setJust(j,&jin);
   sgx_status_t ret;
   sgx_status_t status = COMB_TEEstore(global_eid, &ret, &jin, &jout);
   Just just = getJust(&jout);
+#endif
 #else
   Just just = tc.TEEstore(stats,this->nodes,j);
 #endif
@@ -1401,10 +1401,12 @@ Just Handler::callTEEstoreComb(Just j) {
 }
 
 
+// Legacy Free/OneP/chained-baseline wrappers removed from build.
+#if 0
 bool Handler::callTEEverifyFree(Auths auths, std::string s) {
   auto start = std::chrono::steady_clock::now();
   bool b = false;
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE)
+#if defined(BASIC_FREE)
   payload_t pin;
   setPayload(s,&pin);
   auths_t ain;
@@ -1427,7 +1429,7 @@ bool Handler::callTEEverifyFree(Auths auths, std::string s) {
 bool Handler::callTEEverifyFree2(Auths auths1, std::string s1, Auths auths2, std::string s2) {
   auto start = std::chrono::steady_clock::now();
   bool b = false;
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE)
+#if defined(BASIC_FREE)
   payload_t pin1;
   setPayload(s1,&pin1);
   auths_t ain1;
@@ -1454,7 +1456,7 @@ bool Handler::callTEEverifyFree2(Auths auths1, std::string s1, Auths auths2, std
 Auth Handler::callTEEauthFree(std::string s) {
   auto start = std::chrono::steady_clock::now();
   Auth a;
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE)
+#if defined(BASIC_FREE)
   payload_t pin;
   setPayload(s,&pin);
   auth_t aout;
@@ -1493,7 +1495,7 @@ std::string h2sx(hash_t hash) {
 /*
 HJust Handler::callTEEprepareFree(Hash h) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(BASIC_ONEP) || defined(CHAINED_CHEAP_AND_QUICK)
   hjust_t jout;
   hash_t hin;
   setHash(h,&hin);
@@ -1517,7 +1519,7 @@ HJust Handler::callTEEprepareFree(Hash h) {
 
 FVJust Handler::callTEEstoreFree(PJust j) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_FREE)
   fvjust_t jout;
   pjust_t jin;
   setPJust(j,&jin);
@@ -1538,7 +1540,7 @@ FVJust Handler::callTEEstoreFree(PJust j) {
 
 HAccum Handler::callTEEaccumFree(FJust high, FJust justs[MAX_NUM_SIGNATURES-1], Hash hash) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_FREE)
   haccum_t aout;
   fjust_t jin;
   fjusts_t jsin;
@@ -1564,7 +1566,7 @@ HAccum Handler::callTEEaccumFree(FJust high, FJust justs[MAX_NUM_SIGNATURES-1], 
 // a simpler version of callTEEaccum for when all votes are for the same payload
 HAccum Handler::callTEEaccumFreeSp(ofjust_t just, Hash hash) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_FREE)
   haccum_t aout;
   hash_t hin;
   setHash(hash,&hin);
@@ -1586,7 +1588,7 @@ HAccum Handler::callTEEaccumFreeSp(ofjust_t just, Hash hash) {
 
 OPproposal Handler::callTEEprepareOP(Hash h) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
+#if 0
   opproposal_t pout;
   hash_t hin;
   setHash(h,&hin);
@@ -1609,7 +1611,7 @@ OPproposal Handler::callTEEprepareOP(Hash h) {
 
 OPstore Handler::callTEEstoreOP(OPproposal prop) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
+#if 0
   opstore_t sout;
   opproposal_t pin;
   setOPproposal(prop,&pin);
@@ -1631,7 +1633,7 @@ OPstore Handler::callTEEstoreOP(OPproposal prop) {
 bool Handler::callTEEverifyOP(Auths auths, std::string s) {
   auto start = std::chrono::steady_clock::now();
   bool b = false;
-#if defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
+#if 0
   payload_t pin;
   setPayload(s,&pin);
   auths_t ain;
@@ -1654,7 +1656,7 @@ bool Handler::callTEEverifyOP(Auths auths, std::string s) {
 
 OPaccum Handler::callTEEaccumOp(OPstore high, OPstore justs[MAX_NUM_SIGNATURES-1]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
+#if 0
   if (DEBUG1) std::cout << KBLU << nfo() << "(callTEEaccumOP)" << KNRM << std::endl;
   //exit(0);
   opaccum_t aout;
@@ -1680,7 +1682,7 @@ OPaccum Handler::callTEEaccumOp(OPstore high, OPstore justs[MAX_NUM_SIGNATURES-1
 // a simpler version of callTEEaccum for when all votes are for the same payload
 OPaccum Handler::callTEEaccumOpSp(OPprepare just) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
+#if 0
   if (DEBUG1) std::cout << KBLU << nfo() << "callTEEaccumOpSp:" << just.prettyPrint() << KNRM << std::endl;
   //exit(0);
   opaccum_t aout;
@@ -1707,7 +1709,7 @@ OPaccum Handler::callTEEaccumOpSp(OPprepare just) {
 
 OPvote Handler::callTEEvoteOP(Hash h) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
+#if 0
   opvote_t vout;
   hash_t hin;
   setHash(h,&hin);
@@ -1730,11 +1732,10 @@ OPvote Handler::callTEEvoteOP(Hash h) {
 
 Just Handler::callTEEsignCh() {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   just_t jout;
   sgx_status_t ret;
-  sgx_status_t status = CH_TEEsign(global_eid, &ret, &jout);
-  Just just = getJust(&jout);
+  Just just = Just(); // chained-baseline path removed
 #else
   Just just = tp.TEEsign();
 #endif
@@ -1748,7 +1749,7 @@ Just Handler::callTEEsignCh() {
 
 Just Handler::callTEEprepareCh(JBlock block, JBlock block0, JBlock block1) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   just_t jout;
   // 1st block
   jblock_t jin;
@@ -1761,8 +1762,7 @@ Just Handler::callTEEprepareCh(JBlock block, JBlock block0, JBlock block1) {
   setJBlock(block1,&jin1);
   // --
   sgx_status_t ret;
-  sgx_status_t status = CH_TEEprepare(global_eid, &ret, &jin, &jin0, &jin1, &jout);
-  Just just = getJust(&jout);
+  Just just = Just(); // chained-baseline path removed
 #else
   Just just = tp.TEEprepare(stats,this->nodes,block,block0,block1);
 #endif
@@ -1774,9 +1774,11 @@ Just Handler::callTEEprepareCh(JBlock block, JBlock block0, JBlock block1) {
 }
 
 
+#endif
+
 Just Handler::callTEEsignChComb() {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   just_t jout;
   sgx_status_t ret;
   sgx_status_t status = CH_COMB_TEEsign(global_eid, &ret, &jout);
@@ -1794,7 +1796,7 @@ Just Handler::callTEEsignChComb() {
 
 Just Handler::callTEEprepareChComb(CBlock block, Hash hash) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   just_t jout;
   // 1st block
   cblock_t cin;
@@ -1821,7 +1823,7 @@ Just Handler::callTEEprepareChComb(CBlock block, Hash hash) {
 
 Accum Handler::callTEEaccumChComb(Just justs[MAX_NUM_SIGNATURES]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   accum_t aout;
   onejusts_t jin;
   setOneJusts(justs,&jin);
@@ -1842,7 +1844,7 @@ Accum Handler::callTEEaccumChComb(Just justs[MAX_NUM_SIGNATURES]) {
 // a simpler version of callTEEaccumChComb for when all votes are for the same payload
 Accum Handler::callTEEaccumChCombSp(just_t just) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
   accum_t aout;
   sgx_status_t ret;
   sgx_status_t status = CH_COMB_TEEaccumSp(global_eid, &ret, &just, &aout);
@@ -1912,59 +1914,6 @@ void Handler::getStarted() {
     else { sendMsgNewViewComb(msg,recipients); }
   }
   if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << leader << ")" << KNRM << std::endl;
-#elif defined(BASIC_FREE)
-  // we still need more messages to get started
-  this->prepjust=PJust(Hash(false),0,Auth(false),Auths());
-  //if (DEBUG1) std::cout << KLRED << nfo() << "storing" << KNRM << std::endl;
-  FVJust j = callTEEstoreFree(this->prepjust);
-  //if (DEBUG1) std::cout << KLRED << nfo() << "stored" << KNRM << std::endl;
-  MsgNewViewFree msg(j.getData(),j.getAuth2());
-  if (DEBUG1) std::cout << KLRED << nfo() << "starting with:" << msg.prettyPrint() << KNRM << std::endl;
-  if (amCurrentLeader()) { handleNewviewFree(msg); }
-  else { sendMsgNewViewFree(msg,recipients); }
-  if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << leader << ")" << KNRM << std::endl;
-#elif defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(BASIC_ONEPD)
-  this->opprep=OPprepare(0,Hash(false),0,Auths());
-  //if (DEBUG1) std::cout << KLRED << nfo() << "storing" << KNRM << std::endl;
-  //FVJust j = callTEEstoreFree(this->opprep);
-  //if (DEBUG1) std::cout << KLRED << nfo() << "stored" << KNRM << std::endl;
-  MsgNewViewOPA msg(this->opprep);
-  if (DEBUG1) std::cout << KLRED << nfo() << "starting with:" << msg.prettyPrint() << KNRM << std::endl;
-  if (amCurrentLeader()) { handleNewviewOP(msg); }
-  else { sendMsgNewViewOP(msg,recipients); }
-  if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << leader << ")" << KNRM << std::endl;
-#elif defined(BASIC_QUICK) || defined(BASIC_QUICK_DEBUG)
-  MsgNewViewAcc msg = createMsgNewViewAcc();
-  if (DEBUG1) std::cout << KBLU << nfo() << "starting with:" << msg.prettyPrint() << KNRM << std::endl;
-  if (amCurrentLeader()) { handleNewviewAcc(msg); }
-  else { sendMsgNewViewAcc(msg,recipients); }
-  if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << leader << ")" << KNRM << std::endl;
-#elif defined(BASIC_CHEAP) || defined(BASIC_BASELINE)
-  Just j = callTEEsign();
-  if (DEBUG1) std::cout << KBLU << nfo() << "initial just:" << j.prettyPrint() << KNRM << std::endl;
-  MsgNewView msg(j.getRData(),j.getSigns());
-  if (DEBUG1) std::cout << KBLU << nfo() << "starting with:" << msg.prettyPrint() << KNRM << std::endl;
-  if (amCurrentLeader()) { handleNewview(msg); }
-  else { sendMsgNewView(msg,recipients); }
-  if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << leader << ")" << KNRM << std::endl;
-#elif defined(CHAINED_BASELINE)
-  // We start voting
-  Just j = callTEEsignCh();
-  if (DEBUG1) std::cout << KBLU << nfo() << "initial just:" << j.prettyPrint() << KNRM << std::endl;
-  MsgNewViewCh msg(j.getRData(),j.getSigns().get(0));
-  if (DEBUG1) std::cout << KBLU << nfo() << "starting with:" << msg.prettyPrint() << KNRM << std::endl;
-  // The view starts at 1 here
-  this->view = 1;
-  // we store the genesis block at view 0
-  this->jblocks[0] = JBlock();
-  stats.startExecTime(0,std::chrono::steady_clock::now());
-  // We handle the message
-  if (amCurrentLeader()) { handleNewviewCh(msg); }
-  else {
-    sendMsgNewViewCh(msg,nextRecipients);
-    handleEarlierMessagesCh();
-  }
-  if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << nextLeader << ")" << KNRM << std::endl;
 #elif defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
   // We start voting
   Just j = callTEEsignChComb();
@@ -1984,6 +1933,8 @@ void Handler::getStarted() {
     handleEarlierMessagesChComb();
   }
   if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << nextLeader << ")" << KNRM << std::endl;
+#else
+  #error "Unsupported protocol macro for Handler::getStarted"
 #endif
 }
 
@@ -2094,7 +2045,10 @@ void Handler::recordStats() {
   double kopsv = ((totv.n)*(MAX_NUM_TRANSACTIONS)*1.0) / 1000;
   double secsView = /*time*/ totv.tot / (1000*1000);
   if (DEBUG0) std::cout << KBLU << nfo() << "VIEW|view=" << this->view << ";Kops=" << kopsv << ";secs=" << secsView << ";n=" << totv.n << KNRM << std::endl;
-  double throughputView = kopsv/secsView;
+  double throughputView = 0.0;
+  if (secsView > 0.0) {
+    throughputView = kopsv / secsView;
+  }
 
   // Debugging - handle
   Times toth = stats.getTotalHandleTime(quant1);
@@ -2107,10 +2061,13 @@ void Handler::recordStats() {
   //fileThroughputHandle.close();
 
   // Latency
-#if defined (CHAINED_BASELINE) || defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
+#if defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
   double latencyView = (stats.getExecTimeAvg() / 1000)/* milli-seconds spent on views */;
 #else
-  double latencyView = (totv.tot/totv.n / 1000)/* milli-seconds spent on views */;
+  double latencyView = 0.0;
+  if (totv.n > 0 && totv.tot > 0.0) {
+    latencyView = (totv.tot / totv.n / 1000)/* milli-seconds spent on views */;
+  }
 #endif
 
   // Handle
@@ -3723,8 +3680,9 @@ void Handler::handle_commitcomb(MsgCommitComb msg, const PeerNet::conn_t &conn) 
 
 
 // ----------------------------------------------
-// -- Free version
+// -- Free / OneP / Chained-baseline (removed)
 // --
+#if 0
 
 
 MsgNewViewFree Handler::highestNewViewFree(std::set<MsgNewViewFree> *newviews) {
@@ -5959,6 +5917,8 @@ void Handler::handle_prepare_ch(MsgPrepareCh msg, const PeerNet::conn_t &conn) {
 
 
 
+
+#endif
 
 /////////////////////////////////////////////////////////
 // ---- Chained Cheap&Quick

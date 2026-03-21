@@ -102,7 +102,7 @@ int main(int argc, char const *argv[]) {
   unsigned int numNodes = (constFactor*numFaults)+1;
   std::string confFile = "config";
   Nodes nodes(confFile,numNodes);
-  if (DEBUG1) std::cout << KRED << "Node 0 isTEE" << nodes.find(0)->getIsTEE() << KNRM << std::endl;
+  if (DEBUG1) std::cout << KRED << "Node"<< myid << "isTEE" << nodes.find(0)->getIsTEE() << KNRM << std::endl;
 
 
   // -- Public keys
@@ -130,53 +130,19 @@ int main(int argc, char const *argv[]) {
 
   long unsigned int size = std::max({sizeof(MsgTransaction), sizeof(MsgReply), sizeof(MsgStart)});
 
-#if defined(BASIC_CHEAP) || defined(BASIC_BASELINE)
-  size = std::max({size,
-                   sizeof(MsgNewView),
-                   sizeof(MsgPrepare),
-                   sizeof(MsgLdrPrepare),
-                   sizeof(MsgPreCommit),
-                   sizeof(MsgCommit)});
-#elif defined(BASIC_QUICK) || defined(BASIC_QUICK_DEBUG)
-  size = std::max({size,
-                   sizeof(MsgNewViewAcc),
-                   sizeof(MsgLdrPrepareAcc),
-                   sizeof(MsgPrepareAcc),
-                   sizeof(MsgPreCommitAcc)});
-#elif defined(BASIC_HYBRID_TEE) || defined(BASIC_HYBRID_TEE_DEBUG)
+#if defined(BASIC_HYBRID_TEE) || defined(BASIC_HYBRID_TEE_DEBUG)
   size = std::max({size,
                    sizeof(MsgNewViewComb),
                    sizeof(MsgLdrPrepareComb),
                    sizeof(MsgPrepareComb)});
                   //  sizeof(MsgPreCommitComb)});
-#elif defined(BASIC_FREE)
-  size = std::max({size,
-                   sizeof(MsgNewViewFree),
-                   sizeof(MsgLdrPrepareFree),
-                   sizeof(MsgBckPrepareFree),
-                   sizeof(MsgPrepareFree),
-                   sizeof(MsgPreCommitFree)});
-#elif defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC)
-  size = std::max({size,
-                   sizeof(MsgNewViewOPA),
-                   sizeof(MsgNewViewOPB),
-                   sizeof(MsgLdrPrepareOPA),
-                   sizeof(MsgLdrPrepareOPB),
-                   sizeof(MsgLdrPrepareOPC),
-                   sizeof(MsgBckPrepareOP),
-                   sizeof(MsgPreCommitOP),
-                   sizeof(MsgLdrAddOP),
-                   sizeof(MsgBckAddOP)});
-#elif defined(CHAINED_BASELINE)
-  size = std::max({size,
-                   sizeof(MsgNewViewCh),
-                   sizeof(MsgLdrPrepareCh),
-                   sizeof(MsgPrepareCh)});
 #elif defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
   size = std::max({size,
                    sizeof(MsgNewViewChComb),
                    sizeof(MsgLdrPrepareChComb),
                    sizeof(MsgPrepareChComb)});
+#else
+#error "Unsupported protocol macro for Server.cpp"
 #endif
 
   if (DEBUG0) {

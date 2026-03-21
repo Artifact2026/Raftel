@@ -22,13 +22,13 @@
 
 // ------------------------------------
 // SGX related stuff
-#if defined(BASIC_CHEAP) || defined(BASIC_QUICK) || defined(BASIC_HYBRID_TEE) || defined(BASIC_FREE) || defined(BASIC_ONEP) || defined(BASIC_ONEPB) || defined(BASIC_ONEPC) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
 //
 #include "Enclave_u.h"
 #include "sgx_urts.h"
 #include "sgx_utils/sgx_utils.h"
 //
-#else // i.e.,  defined(BASIC_BASELINE) || defined(CHAINED_BASELINE) || defined(BASIC_QUICK_DEBUG) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)|| defined(BASIC_HYBRID_TEE_DEBUG)
+#elif defined(BASIC_HYBRID_TEE_DEBUG) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
 //
 #include "TrustedFun.h"
 #include "TrustedAccum.h"
@@ -36,6 +36,8 @@
 #include "TrustedCh.h"
 #include "TrustedChComb.h"
 //
+#else
+#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_CHEAP_AND_QUICK, BASIC_HYBRID_TEE_DEBUG, CHAINED_CHEAP_AND_QUICK_DEBUG."
 #endif
 // ------------------------------------
 
@@ -400,8 +402,9 @@ class Handler {
 
 
   // ------------------------------------------------------------
-  // Free
+  // Free / OneP / Chained-baseline (removed)
   // ------
+  #if 0
 
   void executeFree(FData data);
   void handleEarlierMessagesFree();
@@ -540,6 +543,7 @@ class Handler {
   void handle_newview_ch(MsgNewViewCh msg, const PeerNet::conn_t &conn);
   void handle_prepare_ch(MsgPrepareCh msg, const PeerNet::conn_t &conn);
   void handle_ldrprepare_ch(MsgLdrPrepareCh msg, const PeerNet::conn_t &conn);
+  #endif
 
 
 

@@ -115,6 +115,8 @@ class Handler {
   bool started = false;
   bool stopped = false;
   salticidae::TimerEvent timer;
+  salticidae::TimerEvent liveStatsTimer;
+  long long lastLiveElapsedMs = -1; // de-dup for live samples (avoid duplicate writes within same ms)
   View timerView; // view at which the timer was started
 
   //new 
@@ -173,6 +175,7 @@ class Handler {
   std::string nfo();
 
   bool timeToStop();
+  void recordLiveStats();
   void recordStats();
   void setTimer();
 

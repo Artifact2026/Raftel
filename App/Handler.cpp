@@ -38,6 +38,7 @@ Time startTime = std::chrono::steady_clock::now();
 Time startView = std::chrono::steady_clock::now();
 std::string statsVals;             // Throuput + latency + handle + crypto
 std::string statsDone;             // done recording the stats
+std::string statsLive;             // live throughput/latency samples
 
 Time curTime;
 
@@ -755,7 +756,15 @@ pnet(pec,pconf), cnet(cec,cconf) {
   double seconds = difftime(time,mktime(&y2k));
   statsVals = "stats/vals-" + std::to_string(this->myid) + "-" + std::to_string(seconds);
   statsDone = "stats/done-" + std::to_string(this->myid) + "-" + std::to_string(seconds);
+  statsLive = "stats/live-" + std::to_string(this->myid) + "-" + std::to_string(seconds);
   stats.setId(this->myid);
+
+  this->liveStatsTimer = salticidae::TimerEvent(pec, [this](salticidae::TimerEvent &) {
+    recordLiveStats();
+    this->liveStatsTimer.del();
+    this->liveStatsTimer.add(0.1);
+  });
+  this->liveStatsTimer.add(0.1);
 
 
   auto pshutdown = [&](int) {pec.stop();};
@@ -1642,6 +1651,9 @@ void Handler::recordStats() {
   fileDone.close();
   if (DEBUG1) std::cout << KBLU << nfo() << "printing 'done' file: " << statsDone << KNRM << std::endl;
 
+  // Add one final live sample at consensus end time (avoid missing the last second).
+  recordLiveStats();
+
 
   if (hardStop) {
     // stopping client ec
@@ -1656,6 +1668,48 @@ void Handler::recordStats() {
     if (DEBUG1) std::cout << KBLU << nfo() << "stopped" << KNRM << std::endl;
     //raise(SIGTERM);
   }
+}
+
+
+void Handler::recordLiveStats() {
+  if (!this->started) { return; }
+
+  unsigned int quant2 = 10;
+  Times totv = stats.getTotalViewTime(quant2);
+  double kopsv = ((totv.n) * (MAX_NUM_TRANSACTIONS) * 1.0) / 1000.0;
+  double secsView = totv.tot / (1000.0 * 1000.0);
+  double throughputView = 0.0;
+  if (secsView > 0.0) {
+    throughputView = kopsv / secsView;
+  }
+
+#if defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
+  double latencyView = (stats.getExecTimeAvg() / 1000.0);
+#else
+  double latencyView = 0.0;
+  if (totv.n > 0 && totv.tot > 0.0) {
+    latencyView = (totv.tot / totv.n / 1000.0);
+  }
+#endif
+
+  long long elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - startTime)
+                           .count();
+
+  if (elapsedMs == this->lastLiveElapsedMs) {
+    return; // Avoid writing duplicate samples for the same whole-second.
+  }
+  this->lastLiveElapsedMs = elapsedMs;
+
+  std::ofstream fileLive(statsLive, std::ios::app);
+  // Write elapsed seconds as float, keep 3 decimals (~0.001s) for stable parsing.
+  double elapsedSec = elapsedMs / 1000.0;
+  fileLive << std::to_string(elapsedSec)
+           << " " << std::to_string(throughputView)
+           << " " << std::to_string(latencyView)
+           << " " << std::to_string(this->view)
+           << "\n";
+  fileLive.close();
 }
 
 

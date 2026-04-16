@@ -762,9 +762,9 @@ pnet(pec,pconf), cnet(cec,cconf) {
   this->liveStatsTimer = salticidae::TimerEvent(pec, [this](salticidae::TimerEvent &) {
     recordLiveStats();
     this->liveStatsTimer.del();
-    this->liveStatsTimer.add(0.1);
+    this->liveStatsTimer.add(0.5);
   });
-  this->liveStatsTimer.add(0.1);
+  this->liveStatsTimer.add(0.5);
 
 
   auto pshutdown = [&](int) {pec.stop();};
@@ -804,10 +804,11 @@ void Handler::printClientInfo() {
 
 // leader rotation
 unsigned int Handler::getLeaderOf(View v) {
-  // In some experiment configurations we may have `totalTEE == 0` (no TEE nodes),
-  // but the hybrid protocol still calls this helper. Guard against modulo-by-zero.
-  if (this->totalTEE == 0) { return (v % this->total); }
-  return (v % this->totalTEE);
+  // In some experiment configurations we may have `totalTEE == 0` (no TEE nodes).
+  // Leader candidates then come from all replicas; otherwise from TEE replicas.
+  unsigned int pool = (this->totalTEE == 0) ? this->total : this->totalTEE;
+  if (pool == 0) { return 0; }
+  return (v % pool);
 }
 // unsigned int Handler::getLeaderOf(View v) { return (v % this->total); }
 // leader stable
@@ -1676,42 +1677,56 @@ void Handler::recordLiveStats() {
 
   unsigned int quant2 = 10;
   Times totv = stats.getTotalViewTime(quant2);
-  double kopsv = ((totv.n) * (MAX_NUM_TRANSACTIONS) * 1.0) / 1000.0;
-  double secsView = totv.tot / (1000.0 * 1000.0);
-  double throughputView = 0.0;
-  if (secsView > 0.0) {
-    throughputView = kopsv / secsView;
-  }
-
-#if defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
-  double latencyView = (stats.getExecTimeAvg() / 1000.0);
-#else
-  double latencyView = 0.0;
-  if (totv.n > 0 && totv.tot > 0.0) {
-    latencyView = (totv.tot / totv.n / 1000.0);
-  }
-#endif
 
   long long elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                            std::chrono::steady_clock::now() - startTime)
                            .count();
 
   if (elapsedMs == this->lastLiveElapsedMs) {
-    return; // Avoid writing duplicate samples for the same whole-second.
+    return; // Avoid writing duplicate samples for the same millisecond.
   }
   this->lastLiveElapsedMs = elapsedMs;
+
+  // Sliding-window aggregation for live metrics:
+  // - throughput uses delta_exec / delta_wall_time
+  // - latency uses average view-time of newly completed views in the window
+  this->liveAggHistory.push_back({elapsedMs, totv.n, totv.tot});
+  while (!this->liveAggHistory.empty() &&
+         (this->liveAggHistory.size() > liveWindowMaxSamples ||
+          (elapsedMs - this->liveAggHistory.front().elapsedMs) > liveWindowMs)) {
+    this->liveAggHistory.pop_front();
+  }
+
+  double throughputWindow = 0.0;
+  double latencyWindow = 0.0;
+  if (!this->liveAggHistory.empty()) {
+    const LiveAggSample &base = this->liveAggHistory.front();
+    long long dtMs = elapsedMs - base.elapsedMs;
+    if (dtMs > 0) {
+      int dExecViews = static_cast<int>(totv.n) - static_cast<int>(base.execViews);
+      if (dExecViews < 0) { dExecViews = 0; }
+      double dtSec = dtMs / 1000.0;
+      double dkops = (dExecViews * MAX_NUM_TRANSACTIONS * 1.0) / 1000.0;
+      throughputWindow = dkops / dtSec;
+
+      if (dExecViews > 0) {
+        double dViewMicros = totv.tot - base.totalViewMicros;
+        if (dViewMicros < 0.0) { dViewMicros = 0.0; }
+        latencyWindow = dViewMicros / dExecViews / 1000.0;
+      }
+    }
+  }
 
   std::ofstream fileLive(statsLive, std::ios::app);
   // Write elapsed seconds as float, keep 3 decimals (~0.001s) for stable parsing.
   double elapsedSec = elapsedMs / 1000.0;
   fileLive << std::to_string(elapsedSec)
-           << " " << std::to_string(throughputView)
-           << " " << std::to_string(latencyView)
+           << " " << std::to_string(throughputWindow)
+           << " " << std::to_string(latencyWindow)
            << " " << std::to_string(this->view)
            << "\n";
   fileLive.close();
 }
-
 
 // send replies corresponding to 'hash'
 void Handler::replyTransactions(Transaction *transactions) {

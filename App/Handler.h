@@ -4,6 +4,7 @@
 
 #include <map>
 #include <set>
+#include <deque>
 #include <random>
 
 #include "Message.h"
@@ -117,8 +118,15 @@ class Handler {
   salticidae::TimerEvent timer;
   salticidae::TimerEvent liveStatsTimer;
   long long lastLiveElapsedMs = -1; // de-dup for live samples (avoid duplicate writes within same ms)
+  struct LiveAggSample {
+    long long elapsedMs;
+    unsigned int execViews;
+    double totalViewMicros;
+  };
+  std::deque<LiveAggSample> liveAggHistory;
+  static constexpr long long liveWindowMs = 1000;
+  static constexpr size_t liveWindowMaxSamples = 10;
   View timerView; // view at which the timer was started
-
   //new 
   std::set<View> processedNewViews;
   std::set<View> processedCommit;

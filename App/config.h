@@ -11,18 +11,18 @@
 #define DEBUG1X false
 #define DEBUG1Y false //true
 #define DEBUG1Z false //true
-#define DEBUG1  false
+#define DEBUG1  true
 #define DEBUG2  false
 //debug for hybrid TEE
-#define DEBUGH  false
+#define DEBUGH  true
 // to print timing info
-#define DEBUGT  false
+#define DEBUGT  true
 // adds ocalls to profile crypto in enclaves
 #define DEBUGOT false
 // to print 'EXECUTE' messages
-#define DEBUGE  false
+#define DEBUGE  true
 // to print client messages
-#define DEBUGC  false
+#define DEBUGC  true
 
 
 #define NO_SOCKET          -1

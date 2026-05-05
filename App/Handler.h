@@ -17,6 +17,7 @@
 #include "HJust.h"
 #include "VJust.h"
 #include "FVJust.h"
+#include "KVApp.h"
 #include "../Enclave/user_types.h"
 
 
@@ -69,7 +70,7 @@ using MsgNet      = salticidae::MsgNetwork<uint8_t>;
 // the 2nd int is the number of transactions replied to
 using ClientNfo   = std::tuple<bool,unsigned int,unsigned int,ClientNet::conn_t>;
 using Clients     = std::map<CID,ClientNfo>;
-using rep_queue_t = salticidae::MPSCQueueEventDriven<std::pair<TID,CID>>;
+using rep_queue_t = salticidae::MPSCQueueEventDriven<std::tuple<TID,CID,AppReply>>;
 using Time        = std::chrono::time_point<std::chrono::steady_clock>;
 
 enum class Phase {
@@ -137,6 +138,7 @@ class Handler {
   std::map<View,JBlock> jblocks; // blocks received in each view (Chained baseline)
   std::map<View,CBlock> cblocks; // blocks received in each view (Chained Cheap&Quick)
   Log log; // log of messages
+  std::unique_ptr<KVAppExecutor> kvExecutor;
 
   // Used for the accumulator version
   Cert qcprep;

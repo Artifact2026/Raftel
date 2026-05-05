@@ -39,6 +39,9 @@ Time startView = std::chrono::steady_clock::now();
 std::string statsVals;             // Throuput + latency + handle + crypto
 std::string statsDone;             // done recording the stats
 std::string statsLive;             // live throughput/latency samples
+std::string statsExecBreakdown;    // consensus/kv execution breakdown
+double consensusExecMicros = 0.0;  // accumulated consensus processing time in microseconds
+double kvExecuteMicros = 0.0;      // accumulated kv execution time in microseconds
 
 Time curTime;
 
@@ -590,6 +593,8 @@ pnet(pec,pconf), cnet(cec,cconf) {
   this->priv         = priv;
   this->maxViews     = maxViews;
   this->kf           = k;
+  // One Redis-backed KV executor per replica (local port = 6379 + replica id).
+  this->kvExecutor.reset(new KVAppExecutor(static_cast<int>(this->myid), 6379 + static_cast<int>(this->myid)));
   if (this->totalTEE >= this->tqsize){ this->fastQC = true; }  
 
   if (DEBUG1) { std::cout << KBLU << nfo() << "starting handler" << KNRM << std::endl; }
@@ -619,14 +624,20 @@ pnet(pec,pconf), cnet(cec,cconf) {
   req_tcall = new salticidae::ThreadCall(cec);
   // the client event context handles replies through the 'rep_queue' queue
   rep_queue.reg_handler(cec, [this](rep_queue_t &q) {
-                               std::pair<TID,CID> p;
+                              std::tuple<TID,CID,AppReply> p;
                                while (q.try_dequeue(p)) {
-                                 TID tid = p.first;
-                                 CID cid = p.second;
+                                TID tid = std::get<0>(p);
+                                CID cid = std::get<1>(p);
+                                AppReply appRep = std::get<2>(p);
                                  Clients::iterator cit = this->clients.find(cid);
                                  if (cit != this->clients.end()) {
                                    ClientNfo cnfo = cit->second;
-                                   MsgReply reply(tid);
+                                  MsgReply reply(
+                                    tid,
+                                    static_cast<uint8_t>(appRep.status),
+                                    appRep.del_count,
+                                    appRep.value
+                                  );
                                    ClientNet::conn_t recipient = std::get<3>(cnfo);
                                    if (DEBUG1) std::cout << KBLU << nfo() << "sending reply to " << cid << ":" << reply.prettyPrint() << KNRM << std::endl;
                                    try {
@@ -757,6 +768,7 @@ pnet(pec,pconf), cnet(cec,cconf) {
   statsVals = "stats/vals-" + std::to_string(this->myid) + "-" + std::to_string(seconds);
   statsDone = "stats/done-" + std::to_string(this->myid) + "-" + std::to_string(seconds);
   statsLive = "stats/live-" + std::to_string(this->myid) + "-" + std::to_string(seconds);
+  statsExecBreakdown = "stats/exec-breakdown-" + std::to_string(this->myid) + "-" + std::to_string(seconds);
   stats.setId(this->myid);
 
   this->liveStatsTimer = salticidae::TimerEvent(pec, [this](salticidae::TimerEvent &) {
@@ -1647,6 +1659,23 @@ void Handler::recordStats() {
            << " " << std::to_string(cryptoV);
   fileVals.close();
 
+  double consensusMs = consensusExecMicros / 1000.0;
+  double kvMs = kvExecuteMicros / 1000.0;
+  double totalExecMs = consensusMs + kvMs;
+  double kvRatioPct = (totalExecMs > 0.0) ? (kvMs * 100.0 / totalExecMs) : 0.0;
+  std::ofstream fileExec(statsExecBreakdown);
+  fileExec << "consensus_time_ms " << consensusMs << "\n";
+  fileExec << "kv_execute_time_ms " << kvMs << "\n";
+  fileExec << "kv_execute_ratio_pct " << kvRatioPct << "\n";
+  fileExec.close();
+  if (DEBUG0) {
+    std::cout << KBLU << nfo()
+              << "exec-breakdown consensus_ms=" << consensusMs
+              << " kv_ms=" << kvMs
+              << " kv_ratio_pct=" << kvRatioPct
+              << KNRM << std::endl;
+  }
+
   // Done
   std::ofstream fileDone(statsDone);
   fileDone.close();
@@ -1736,9 +1765,20 @@ void Handler::replyTransactions(Transaction *transactions) {
     TID tid = trans.getTid();
     // The transaction id '0' is reserved for dummy transactions
     if (tid != 0) {
+      // Execute deterministic app logic after consensus commit.
+      AppReply appRep;
+      AppRequest req;
+      if (this->kvExecutor && KVAppCodec::decode(trans, req)) {
+        auto kvStart = std::chrono::steady_clock::now();
+        appRep = this->kvExecutor->execute(req);
+        auto kvEnd = std::chrono::steady_clock::now();
+        kvExecuteMicros += std::chrono::duration_cast<std::chrono::microseconds>(kvEnd - kvStart).count();
+      } else {
+        appRep.status = ReplyStatus::REPLY_ERROR;
+      }
       Clients::iterator cit = this->clients.find(cid);
       if (cit != this->clients.end()) {
-        rep_queue.enqueue(std::make_pair(tid,cid));
+        rep_queue.enqueue(std::make_tuple(tid,cid,appRep));
         //MsgReply reply(tid);
         //ClientNet::conn_t recipient = std::get<2>(cit->second);
         if (DEBUG1) std::cout << KBLU << nfo() << "sending reply to " << cid << ":" << tid << KNRM << std::endl;
@@ -1785,6 +1825,7 @@ void Handler::executeRData(RData rdata) {
   startView = endView;
   stats.incExecViews();
   stats.addTotalViewTime(time);
+  consensusExecMicros += time;
   if (this->transactions.empty()) { this->viewsWithoutNewTrans++; } else { this->viewsWithoutNewTrans = 0; }
 
   // Execute
@@ -2443,6 +2484,7 @@ void Handler::executeCData(CData<Hash,Void> cdata) {
   startView = endView;
   stats.incExecViews();
   stats.addTotalViewTime(time);
+  consensusExecMicros += time;
   if (this->transactions.empty()) { this->viewsWithoutNewTrans++; } else { this->viewsWithoutNewTrans = 0; }
 
   // Execute
@@ -3044,6 +3086,7 @@ void Handler::executeComb(RData data) {
   startView = endView;
   stats.incExecViews();
   stats.addTotalViewTime(time);
+  consensusExecMicros += time;
   if (this->transactions.empty()) { this->viewsWithoutNewTrans++; } else { this->viewsWithoutNewTrans = 0; }
 
   // Execute
@@ -3384,6 +3427,7 @@ void Handler::tryExecuteChComb(CBlock blockL, CBlock block0) {
       startView = endView;
       stats.incExecViews();
       stats.addTotalViewTime(time);
+      consensusExecMicros += time;
       this->viewsWithoutNewTrans++;
       stats.endExecTime(view2,endView);
       //if (this->transactions.empty()) { this->viewsWithoutNewTrans++; } else { this->viewsWithoutNewTrans = 0; }

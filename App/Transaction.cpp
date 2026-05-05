@@ -27,6 +27,12 @@ Transaction::Transaction(CID clientid, TID transid, char c) {
   //for (int i = 0; i < PAYLOAD_SIZE; i++) { this->data.push_back(c); }
 }
 
+Transaction::Transaction(CID clientid, TID transid, const std::array<unsigned char,PAYLOAD_SIZE> &payload) {
+  this->clientid = clientid;
+  this->transid = transid;
+  this->data = payload;
+}
+
 
 CID Transaction::getCid() { return this->clientid; }
 TID Transaction::getTid() { return this->transid;  }
@@ -36,6 +42,7 @@ unsigned char* Transaction::getData() {
   if (PAYLOAD_SIZE == 0) { return nullptr; }
   return &(this->data[0]);
 }
+const std::array<unsigned char,PAYLOAD_SIZE> &Transaction::getPayload() const { return this->data; }
 
 
 std::string Transaction::toString() const {

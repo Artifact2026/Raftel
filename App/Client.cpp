@@ -7,8 +7,13 @@
 #include <unistd.h>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
+#include <cmath>
+#include <ctime>
+#include <random>
 
 #include "Message.h"
+#include "KVApp.h"
 //#include "Nodes.h"
 
 
@@ -62,13 +67,22 @@ unsigned int numInstances = 1;        // by default clients wait for only 1 inst
 unsigned int totaltee = 0;            // total number of TEE nodes
 std::map<TID,TransInfo> transactions; // current transactions
 std::map<TID,double> execTrans;       // set of executed transaction ids
+std::map<TID,Clock> execReplyTimes;   // client-side completion timestamp per transaction
 unsigned int sleepTime = 1;           // time the client sleeps between two sends (in microseconds)
+unsigned int kvSetRatio = 30;         // percentage
+unsigned int kvGetRatio = 60;         // percentage
+unsigned int kvDelRatio = 10;         // percentage
+unsigned int kvKeySpace = 1000;       // number of keys for random workload
+unsigned int kvValueLen = 16;         // value length for SET
+
+std::mt19937 rng;
 
 Clock beginning;
 
 unsigned int inst = 0; // instance number when repeating experiments
 
 std::string statsThroughputLatency;
+std::string statsEndToEnd;
 std::string debugThroughputLatency;
 
 
@@ -116,6 +130,18 @@ unsigned int updTransaction(TID tid) {
 
 bool compare_double (const double& first, const double& second) { return (first < second); }
 
+double percentile_from_sorted(const std::vector<double> &sorted, double p) {
+  if (sorted.empty()) { return 0.0; }
+  if (p <= 0.0) { return sorted.front(); }
+  if (p >= 100.0) { return sorted.back(); }
+  double rank = (p / 100.0) * static_cast<double>(sorted.size() - 1);
+  size_t lo = static_cast<size_t>(std::floor(rank));
+  size_t hi = static_cast<size_t>(std::ceil(rank));
+  if (lo == hi) { return sorted[lo]; }
+  double w = rank - static_cast<double>(lo);
+  return sorted[lo] * (1.0 - w) + sorted[hi] * w;
+}
+
 void printStats() {
   auto end = std::chrono::steady_clock::now();
   double time = std::chrono::duration_cast<std::chrono::microseconds>(end - beginning).count();
@@ -139,15 +165,52 @@ void printStats() {
   for (int i = 0; i < quant; i++) { allLatencies.pop_back(); allLatencies.pop_front(); }*/
 
   double avg = 0.0;
+  std::vector<double> latencySamples;
   for (std::list<double>::iterator it = allLatencies.begin(); it != allLatencies.end(); ++it) {
     avg += (double)*it;
+    latencySamples.push_back((double)*it);
   }
   double latency = avg / allLatencies.size(); /* avg of milliseconds spent on a transaction */
   if (DEBUGC) std::cout << KMAG << cnfo() << "latency=" << latency << KNRM << std::endl;
+  std::sort(latencySamples.begin(), latencySamples.end());
+  double p50 = percentile_from_sorted(latencySamples, 50.0);
+  double p95 = percentile_from_sorted(latencySamples, 95.0);
+  double p99 = percentile_from_sorted(latencySamples, 99.0);
+
+  Clock firstReply = end;
+  Clock lastReply = beginning;
+  if (!execReplyTimes.empty()) {
+    auto firstIt = std::min_element(execReplyTimes.begin(), execReplyTimes.end(),
+      [](const std::pair<const TID,Clock> &a, const std::pair<const TID,Clock> &b) {
+        return a.second < b.second;
+      });
+    auto lastIt = std::max_element(execReplyTimes.begin(), execReplyTimes.end(),
+      [](const std::pair<const TID,Clock> &a, const std::pair<const TID,Clock> &b) {
+        return a.second < b.second;
+      });
+    firstReply = firstIt->second;
+    lastReply = lastIt->second;
+  }
+  double replyWindowUs = std::chrono::duration_cast<std::chrono::microseconds>(lastReply - firstReply).count();
+  double replyWindowSec = (replyWindowUs <= 0.0) ? secs : (replyWindowUs / 1000.0 / 1000.0);
+  if (replyWindowSec <= 0.0) { replyWindowSec = secs; }
+  if (replyWindowSec <= 0.0) { replyWindowSec = 1e-9; }
+  double replyThroughputKtps = (static_cast<double>(execTrans.size()) / replyWindowSec) / 1000.0;
 
   std::ofstream f(statsThroughputLatency);
   f << std::to_string(throughput) << " " << std::to_string(latency);
   f.close();
+
+  std::ofstream e(statsEndToEnd);
+  e << "reply_throughput_ktps " << replyThroughputKtps << "\n";
+  e << "e2e_latency_avg_ms " << latency << "\n";
+  e << "e2e_latency_p50_ms " << p50 << "\n";
+  e << "e2e_latency_p95_ms " << p95 << "\n";
+  e << "e2e_latency_p99_ms " << p99 << "\n";
+  e << "duration_total_sec " << secs << "\n";
+  e << "duration_reply_window_sec " << replyWindowSec << "\n";
+  e << "num_completed " << execTrans.size() << "\n";
+  e.close();
 
   if (DEBUGC) { std::cout << KMAG << cnfo() << "#before=" << execTrans.size() << ";#after=" << allLatencies.size() << KNRM << std::endl; }
 
@@ -174,17 +237,38 @@ void executed(TID tid) {
     auto end = std::chrono::steady_clock::now();
     double time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     execTrans[tid]=time;
+    execReplyTimes[tid]=end;
   }
 }
 
 
 
 void handle_reply(MsgReply &&msg, const MsgNet::conn_t &conn) {
-  TID tid = msg.reply;
+  TID tid = msg.tid;
   if (execTrans.find(tid) == execTrans.end()) { // the transaction hasn't been executed yet
+    if (DEBUGC) {
+      std::cout << cnfo()
+                << " reply tid=" << tid
+                << " status=" << static_cast<int>(msg.status)
+                << " del=" << msg.delCount
+                << " value=" << msg.valueStr()
+                << KNRM << std::endl;
+    }
     unsigned int numReplies = updTransaction(tid);
     if (DEBUGC) { std::cout << cnfo() << "received " << numReplies << "/" << tqsize << " replies for transaction " << tid << KNRM << std::endl; }
     if (numReplies == tqsize) {
+      std::map<TID,TransInfo>::iterator it = transactions.find(tid);
+      if (it != transactions.end()) {
+        Transaction tx = std::get<2>(it->second);
+        AppRequest req;
+        if (KVAppCodec::decode(tx, req) && req.op == OpType::OP_GET) {
+          if (DEBUGC) {
+            std::cout << cnfo() << " GET result tid=" << tid << " key=" << req.key
+                      << " status=" << static_cast<int>(msg.status)
+                      << " value=" << msg.valueStr() << KNRM << std::endl;
+          }
+        }
+      }
       if (DEBUGC) { std::cout << cnfo() << "received all " << numReplies << " replies for transaction " << tid << KNRM << std::endl; }
       executed(tid);
 
@@ -212,7 +296,33 @@ void addNewTransaction(Transaction trans) {
 }
 
 MsgTransaction mkTransaction(TID transid) {
-  Transaction transaction = Transaction(cid,transid,17);
+  std::uniform_int_distribution<unsigned int> ratioDist(1, 100);
+  std::uniform_int_distribution<unsigned int> keyDist(0, std::max(1U, kvKeySpace) - 1);
+  std::uniform_int_distribution<int> chDist(0, 25);
+
+  unsigned int r = ratioDist(rng);
+  OpType op = OpType::OP_GET;
+  if (r <= kvSetRatio) { op = OpType::OP_SET; }
+  else if (r <= kvSetRatio + kvGetRatio) { op = OpType::OP_GET; }
+  else { op = OpType::OP_DEL; }
+
+  AppRequest req;
+  req.op = op;
+  req.client_id = static_cast<int>(cid);
+  req.req_id = static_cast<int>(transid);
+  req.key = "k" + std::to_string(keyDist(rng));
+  if (op == OpType::OP_SET) {
+    req.value.reserve(kvValueLen);
+    for (unsigned int i = 0; i < kvValueLen; ++i) {
+      req.value.push_back(static_cast<char>('a' + chDist(rng)));
+    }
+  }
+
+  std::array<unsigned char, PAYLOAD_SIZE> payload;
+  bool encoded = KVAppCodec::encode(req, payload);
+  Transaction transaction = encoded
+      ? Transaction(cid, transid, payload)
+      : Transaction(cid, transid, static_cast<char>(17));
   addNewTransaction(transaction);
   // TODO: sign
   Sign sign = Sign();
@@ -321,6 +431,32 @@ int main(int argc, char const *argv[]) {
   if (argc > 7) { sscanf(argv[7], "%d", &totaltee); }
   std::cout << cnfo() << "totaltee=" << totaltee << KNRM << std::endl;
 
+  // Optional KV workload params:
+  // argv[8]=set ratio, argv[9]=get ratio, argv[10]=del ratio, argv[11]=keyspace, argv[12]=value length.
+  if (argc > 8) { sscanf(argv[8], "%d", &kvSetRatio); }
+  if (argc > 9) { sscanf(argv[9], "%d", &kvGetRatio); }
+  if (argc > 10) { sscanf(argv[10], "%d", &kvDelRatio); }
+  if (argc > 11) { sscanf(argv[11], "%d", &kvKeySpace); }
+  if (argc > 12) { sscanf(argv[12], "%d", &kvValueLen); }
+  unsigned int ratioSum = kvSetRatio + kvGetRatio + kvDelRatio;
+  if (ratioSum == 0) {
+    kvSetRatio = 30; kvGetRatio = 60; kvDelRatio = 10; ratioSum = 100;
+  }
+  // Normalize to 100 to keep distribution logic simple.
+  kvSetRatio = (kvSetRatio * 100) / ratioSum;
+  kvGetRatio = (kvGetRatio * 100) / ratioSum;
+  kvDelRatio = 100 - kvSetRatio - kvGetRatio;
+  if (kvKeySpace == 0) { kvKeySpace = 1; }
+  if (kvValueLen == 0) { kvValueLen = 1; }
+
+  std::seed_seq seed{
+    static_cast<unsigned int>(cid),
+    static_cast<unsigned int>(inst),
+    static_cast<unsigned int>(numInstances),
+    static_cast<unsigned int>(time(nullptr)),
+  };
+  rng.seed(seed);
+
 
   numNodes = (constFactor*numFaults)+1;
   qsize = numNodes-numFaults;
@@ -338,6 +474,7 @@ int main(int argc, char const *argv[]) {
   double seconds = difftime(time,mktime(&y2k));
   std::string stamp = std::to_string(inst) + "-" + std::to_string(cid) + "-" + std::to_string(seconds);
   statsThroughputLatency = "stats/client-throughput-latency-" + stamp;
+  statsEndToEnd = "stats/client-e2e-" + stamp;
   debugThroughputLatency = "stats/debug-client-throughput-latency";
 
 

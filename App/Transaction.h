@@ -2,6 +2,7 @@
 #define TRANSACTION_H
 
 #include <string>
+#include <array>
 
 #include "config.h"
 #include "types.h"
@@ -22,11 +23,13 @@ class Transaction {
   Transaction();
   Transaction(CID clientid, TID transid);
   Transaction(CID clientid, TID transid, char data);
+  Transaction(CID clientid, TID transid, const std::array<unsigned char,PAYLOAD_SIZE> &payload);
   Transaction(salticidae::DataStream &data);
 
   CID getCid();
   TID getTid();
   unsigned char* getData();
+  const std::array<unsigned char,PAYLOAD_SIZE> &getPayload() const;
 
   void serialize(salticidae::DataStream &data) const;
   void unserialize(salticidae::DataStream &data);

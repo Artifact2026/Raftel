@@ -1,0 +1,11 @@
+[49m[33m[id=27][0m
+[49m[33m[27]#NodeType=TEE[0m
+[49m[33m[27]#Total TEE nodes=31[0m
+[49m[33m[27]#faults=10[0m
+[49m[33m[27]constFactor=3[0m
+[49m[33m[27]#views=50[0m
+[49m[33m[27]timeout=5[0m
+[49m[33m[27]opdist=0[0m
+[27]ENCLAVE:set up id-27
+[27]ENCLAVE:loaded private key
+[27]ENCLAVE:loaded public keys:0-31

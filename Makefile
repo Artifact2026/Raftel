@@ -219,7 +219,7 @@ server: App/Server.o App/Enclave_u.o App/sgx_utils/sgx_utils.o $(Nsgx_App_Cpp_Ob
 	@$(CXX) $^ -o $@ $(App_Link_Flags) $(App_Include_Paths)
 	@echo "LINK <= $@"
 
-client: App/Client.o App/Stats.o App/Signs.o App/Sign.o App/Nodes.o App/NodeInfo.o App/KeysFun.o App/Transaction.o # $(Nsgx_App_Cpp_Objects)
+client: App/Client.o App/Stats.o App/Signs.o App/Sign.o App/Nodes.o App/NodeInfo.o App/KeysFun.o App/Transaction.o App/KVApp.o # $(Nsgx_App_Cpp_Objects)
 	@$(CXX) $^ -o $@ $(LDLIBS) $(Salticidae_Lib_Paths) -lsalticidae $(Salticidae_Include_Paths)
 	@echo "LINK <= $@"
 
@@ -246,7 +246,7 @@ $(App_Name): App/Server.cpp App/Enclave_u.o $(App_Cpp_Objects)
 	@$(CXX) $^ -o $@ $(App_Link_Flags) $(App_Include_Paths)
 	@echo "LINK =>  $@"
 
-sgxclient: App/Client.cpp App/Stats.o App/Signs.o App/Sign.o App/Nodes.o App/NodeInfo.o App/KeysFun.o App/Transaction.o #App/Enclave_u.o $(App_Cpp_Objects)
+sgxclient: App/Client.cpp App/Stats.o App/Signs.o App/Sign.o App/Nodes.o App/NodeInfo.o App/KeysFun.o App/Transaction.o App/KVApp.o #App/Enclave_u.o $(App_Cpp_Objects)
 	@$(CXX) $^ -o $@ $(App_Link_Flags) $(App_Include_Paths)
 	@echo "LINK <= $@"
 

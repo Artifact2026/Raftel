@@ -1,6 +1,8 @@
 #ifndef MSG_H
 #define MSG_H
 
+#include <array>
+#include <algorithm>
 #include <set>
 
 #include "Nodes.h"
@@ -92,18 +94,43 @@ struct MsgStart {
 
 struct MsgReply {
   static const uint8_t opcode = HDR_REPLY;
+  static const uint16_t MAX_VALUE_SIZE = 128;
   salticidae::DataStream serialized;
-  unsigned int reply;
-  MsgReply(const unsigned int &reply) : reply(reply) { serialized << reply; }
-  MsgReply(salticidae::DataStream &&s) { s >> reply; }
+  unsigned int tid;
+  uint8_t status;
+  int delCount;
+  uint16_t valueSize;
+  std::array<uint8_t, MAX_VALUE_SIZE> value;
+  MsgReply(const unsigned int &tid, uint8_t status, int delCount, const std::string &valueStr)
+      : tid(tid), status(status), delCount(delCount), valueSize(0) {
+    value.fill(0);
+    valueSize = static_cast<uint16_t>(std::min<size_t>(valueStr.size(), MAX_VALUE_SIZE));
+    for (uint16_t i = 0; i < valueSize; ++i) { value[i] = static_cast<uint8_t>(valueStr[i]); }
+    serialized << tid << status << delCount << valueSize;
+    serialized.put_data(value);
+  }
+  MsgReply(salticidae::DataStream &&s) {
+    s >> tid >> status >> delCount >> valueSize;
+    value.fill(0);
+    unsigned int n = MAX_VALUE_SIZE * sizeof(uint8_t);
+    const uint8_t *arr = s.get_data_inplace(n);
+    std::copy_n(arr, n, std::begin(value));
+    if (valueSize > MAX_VALUE_SIZE) { valueSize = MAX_VALUE_SIZE; }
+  }
+  std::string valueStr() const {
+    return std::string(reinterpret_cast<const char *>(value.data()), valueSize);
+  }
   bool operator<(const MsgReply& s) const {
-    if (reply < s.reply) { return true; }
+    if (tid < s.tid) { return true; }
     return false;
   }
   std::string prettyPrint() {
-    return "REPLY[" + std::to_string(reply) + "]";
+    return "REPLY[tid=" + std::to_string(tid)
+        + ",status=" + std::to_string(status)
+        + ",del=" + std::to_string(delCount)
+        + ",value=" + valueStr() + "]";
   }
-  unsigned int sizeMsg() { return (sizeof(unsigned int)); }
+  unsigned int sizeMsg() { return (sizeof(unsigned int) + sizeof(uint8_t) + sizeof(int) + sizeof(uint16_t) + MAX_VALUE_SIZE); }
   //void serialize(salticidae::DataStream &s) const { s << reply; }
 };
 

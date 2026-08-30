@@ -5,6 +5,16 @@
 #include <string>
 #include <unordered_map>
 
+#if __has_include(<hiredis/hiredis.h>)
+#define KVAPP_HAS_HIREDIS 1
+#include <hiredis/hiredis.h>
+#elif __has_include(<hiredis.h>)
+#define KVAPP_HAS_HIREDIS 1
+#include <hiredis.h>
+#else
+#define KVAPP_HAS_HIREDIS 0
+#endif
+
 #include "Transaction.h"
 
 enum class OpType : uint8_t {
@@ -44,17 +54,23 @@ class KVAppExecutor {
  private:
   int replica_id;
   int redis_port;
+#if KVAPP_HAS_HIREDIS
+  redisContext *redis_ctx = nullptr;
+#else
+  void *redis_ctx = nullptr;
+#endif
   std::unordered_map<std::string, AppReply> dedup_cache;
   std::unordered_map<std::string, std::string> mem_fallback;
-  bool warned_missing_redis_cli = false;
+  bool warned_redis_unavailable = false;
 
   std::string dedupKey(int client_id, int req_id) const;
-  bool runRedisCli(const std::string &cmd, std::string &output);
+  bool ensureRedisConnected();
   AppReply execRedis(const AppRequest &req);
   AppReply execFallback(const AppRequest &req);
 
  public:
   KVAppExecutor(int rid, int port);
+  ~KVAppExecutor();
   AppReply execute(const AppRequest &req);
 };
 

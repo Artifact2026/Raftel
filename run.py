@@ -16,6 +16,8 @@ from threading import Lock
 import argparse
 import multiprocessing
 import shlex
+import statistics
+from typing import Optional
 
 
 # Protocol metadata: quorum factor (e.g. 3f+1 vs 2f+1) and git branch for makeInstance checkout.
@@ -53,7 +55,7 @@ def num_replicas(factor: int, faults: int) -> int:
 #   run --p01 Chained-Hybrid   ~ (no direct single flag; see experiments CH*)
 #   run --p1 Achilles          ~ experiments Achilles branch
 #   run --p2 FlexiBFT          ~ experiments multi-branch
-#   run --p3 Damysus           ~ experiments --p6 chained COMB (CHAINED_CHEAP_AND_QUICK)
+#   run --p3 Damysus           ~ experiments --p6 chained COMB (CHAINED_HYBRID_TEE)
 #   run --p4 Oneshot           ~ experiments --p8 (ONEP / BASIC_ONEP)
 #   run --p5 Hotstuff          ~ experiments --p1 (BASE / BASIC_BASELINE)
 # Local defaults aligned with experiments.py: numViews=10, numClTrans=1, config isTEE:1 for all nodes.
@@ -96,6 +98,7 @@ numClTrans   = 1     # number of transactions sent by each clients
 sleepTime    = 0     # start servers between 2 sends (in microseconds)
 timeout      = 5     # timeout before changing changing leader (in seconds)
 timeoutTime  = 240    #waiting time for the servers execution
+# WAN / cloud runs (~100ms RTT): view-change timer near 2s is typical (override via --view-timeout).
 kv_set_ratio = 30
 kv_get_ratio = 60
 kv_del_ratio = 10
@@ -116,7 +119,7 @@ SSH_USERNAME = 'root'
 SSH_KEY_PATH = './TShard'
 
 #deploy setting
-numInstance   = 10 #number of instances run in a Machine
+numInstance   = 15 #number of instances run in a Machine
 allLocalPorts = []    # list of all port numbers used in local experiments
 ipsOfNodes    = {}    # dictionnary mapping node ids to IPs (local override)
 startRport    = 8760
@@ -185,6 +188,11 @@ def scp_to_node(ip, files):
             scp.put(file, remote_path=remote_path)
     ssh.close()
 
+def remote_stats_dir() -> str:
+    """Remote stats directory on each cluster node (under REMOTE_PROJECT_ROOT)."""
+    return str(REMOTE_PROJECT_ROOT / "stats")
+
+
 # execute sgxserver
 def ssh_exec_server_non_blocking(
     id,
@@ -199,15 +207,20 @@ def ssh_exec_server_non_blocking(
     lock,
     num_views,
     opdist,
+    *,
+    view_timeout=None,
+    clear_remote_stats: bool = True,
 ):
     ssh = SSHClient()
     ssh.set_missing_host_key_policy(AutoAddPolicy())
     ssh.connect(host, username=SSH_USERNAME, key_filename=SSH_KEY_PATH)
     nodeType = "TEE" if id < totaltee else "nonTEE"
+    vc_to = float(timeout if view_timeout is None else view_timeout)
+    rm_stats = "rm -rf stats/* && " if clear_remote_stats else ""
     if debug:
-        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && rm -rf stats/* && ./server {id} {nodeType} {totaltee} {faults} {factor} {num_views} {timeout} {opdist} > out{id}"
+        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./server {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} > out{id}"
     else:
-        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && rm -rf stats/* && ./sgxserver {id} {nodeType} {totaltee} {faults} {factor} {num_views} {timeout} {opdist} > out{id}"
+        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./sgxserver {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} > out{id}"
     stdin, stdout, stderr = ssh.exec_command(cmd)
 
     # Non-blocking monitoring of command execution status
@@ -336,6 +349,9 @@ def start_all_sgxservers(
     num_views,
     opdist,
     max_workers=6,
+    *,
+    view_timeout=None,
+    clear_remote_stats: bool = True,
 ):
     completion_set = set()
     lock = threading.Lock()
@@ -355,12 +371,52 @@ def start_all_sgxservers(
                 lock,
                 num_views,
                 opdist,
+                view_timeout=view_timeout,
+                clear_remote_stats=clear_remote_stats,
             )
             for id, host, port1, port2 in servers
         ]
         for future in as_completed(futures):
             future.result()
     return completion_set, lock
+
+
+def ssh_kill_sgxserver_on_host(host: str, replica_id=None) -> None:
+    """
+    Kill replica server process(es) on one VM. If replica_id is set, prefer matching argv id
+    (multiple replicas per host would otherwise all receive pkill).
+    """
+    rp = str(REMOTE_PROJECT_ROOT)
+    if replica_id is not None:
+        pat = f"sgxserver {replica_id} "
+        pat2 = f"./server {replica_id} "
+        bash = (
+            f"cd {shlex.quote(rp)} && "
+            f"( pkill -f {shlex.quote(pat)} || true ) && "
+            f"( pkill -f {shlex.quote(pat2)} || true )"
+        )
+    else:
+        bash = (
+            f"cd {shlex.quote(rp)} && "
+            "( pkill -f sgxserver || true ) && "
+            "( pkill -f './server' || true )"
+        )
+    ssh = SSHClient()
+    ssh.set_missing_host_key_policy(AutoAddPolicy())
+    ssh.connect(host, username=SSH_USERNAME, key_filename=SSH_KEY_PATH)
+    stdin, stdout, stderr = ssh.exec_command("bash -lc " + shlex.quote(bash))
+    stdout.channel.recv_exit_status()
+    ssh.close()
+
+
+def poll_remote_stats_forever(ips, stop_event: threading.Event, interval_sec: float):
+    """Periodically mirror REMOTE_PROJECT_ROOT/stats from every node into local PROJECT_ROOT/stats."""
+    remote_stats = remote_stats_dir() + os.sep
+    while not stop_event.wait(interval_sec):
+        try:
+            scp_stats_from_nodes(ips, str(PROJECT_ROOT) + os.sep, remote_stats)
+        except Exception as e:
+            print("[fault-cloud] stats poll failed:", e)
 
 
 def ssh_start_redis_on_node(host: str, replica_id: int):
@@ -689,11 +745,80 @@ def scp_stats_from_nodes(ip_list, local_path, remote_path, max_workers=6):
             future.result()
 
 
+def clear_local_client_logs():
+    """
+    Remove orchestrator client logs under out/ (client-*.log) so each run.py
+    execution only keeps the latest client output.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for fp in out_dir.glob("client-*.log"):
+        if fp.is_file():
+            fp.unlink()
+
+
 def clear_local_out_logs():
+    """
+    Remove stale remote-server out* logs before re-fetching from nodes.
+    Preserve orchestrator client logs (client-*.log) written during this run.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     for fp in out_dir.glob("*"):
         if fp.is_file():
+            if fp.name.startswith("client-"):
+                continue
             fp.unlink()
+
+
+def clear_remote_server_out_logs():
+    """
+    Remove files previously fetched by scp_out_logs_from_node (names like
+    "<host_with_underscores>-out..."). Does not delete client-*.log or other files.
+    Call before each cloud experiment so out/ is not mixed with the last run's server logs.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for fp in out_dir.glob("*"):
+        if not fp.is_file():
+            continue
+        if fp.name.startswith("client-"):
+            continue
+        if "-" not in fp.name:
+            continue
+        _, rest = fp.name.split("-", 1)
+        if rest.startswith("out"):
+            fp.unlink()
+
+
+def ssh_clear_repo_out_logs_on_host(ip: str) -> None:
+    """
+    Delete server stdout logs under REMOTE_PROJECT_ROOT on one machine (files named out*,
+    same convention as scp_out_logs_from_node / sgxserver redirection to out{id}).
+    """
+    rp = str(REMOTE_PROJECT_ROOT)
+    bash = (
+        f"cd {shlex.quote(rp)} && "
+        "find . -maxdepth 1 -type f -name 'out*' -delete"
+    )
+    ssh = SSHClient()
+    ssh.set_missing_host_key_policy(AutoAddPolicy())
+    ssh.connect(ip, username=SSH_USERNAME, key_filename=SSH_KEY_PATH)
+    stdin, stdout, stderr = ssh.exec_command("bash -lc " + shlex.quote(bash))
+    exit_code = stdout.channel.recv_exit_status()
+    err = stderr.read().decode().strip()
+    ssh.close()
+    if exit_code != 0:
+        raise RuntimeError(
+            f"clear remote out logs failed on {ip}: exit={exit_code} err={err}"
+        )
+
+
+def ssh_clear_repo_out_logs_on_hosts(ip_list, max_workers=6):
+    """Run ssh_clear_repo_out_logs_on_host on each distinct cluster IP."""
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(ssh_clear_repo_out_logs_on_host, ip) for ip in ip_list
+        ]
+        for future in as_completed(futures):
+            future.result()
 
 
 def scp_out_logs_from_node(ip: str, local_out_path: str):
@@ -746,7 +871,7 @@ def find_first_number(directory):
     print("No valid data found.")
     return None
 
-def calculate_mean_of_values(directory):
+def calculate_mean_of_values(directory, *, silent=False):
     vals_files = glob.glob(os.path.join(directory, 'vals*'))
     total_count = 0
     sum_first = 0.0
@@ -760,18 +885,29 @@ def calculate_mean_of_values(directory):
                 if len(values) >= 2:
                     sum_first += values[0]
                     sum_second += values[1]
-                    print(f'{total_count}, {values[0]}, {values[1]}')
+                    if not silent:
+                        print(f'{total_count}, {values[0]}, {values[1]}')
                     total_count += 1
 
     if total_count > 0:
         mean_first = sum_first / total_count
         mean_second = sum_second / total_count
-        print(f"Mean of the first number across all vals files: {mean_first}")
-        print(f"Mean of the second number across all vals files: {mean_second}")
+        if not silent:
+            print(f"Mean of the first number across all vals files: {mean_first}")
+            print(f"Mean of the second number across all vals files: {mean_second}")
         return (mean_first, mean_second)
     else:
-        print("No vals files found or no valid data.")
+        if not silent:
+            print("No vals files found or no valid data.")
         return (0, 0)
+
+
+def append_wan_stats_summary_row(label: Optional[str], thr_mean: float, lat_mean: float) -> None:
+    """Append ``label, thr_mean, lat_mean`` to stats.txt (WAN sweep). Label must be non-empty."""
+    if not label:
+        return
+    with open(stats_txt, "a") as f:
+        f.write(f"{label}, {thr_mean}, {lat_mean}\n")
 
 
 def compute_stats_like_experiments(stats_directory: str):
@@ -951,23 +1087,91 @@ def close_client_log_handles(client_procs):
                 pass
 
 
-def plot_live_throughput_latency(stats_directory: str, out_png: str, out_csv: str):
+def _live_file_replica_id(path: str):
+    """Parse replica id from basename ``live-<id>-<stamp>``."""
+    base = os.path.basename(path)
+    if not base.startswith("live-"):
+        return None
+    rest = base[len("live-") :]
+    dash = rest.find("-")
+    if dash <= 0:
+        return None
+    try:
+        return int(rest[:dash])
+    except ValueError:
+        return None
+
+
+def plot_live_throughput(
+    stats_directory: str,
+    out_png: str,
+    out_csv: str,
+    *,
+    reference_replica_id=None,
+    exclude_replica_ids=None,
+    aggregate_median=False,
+):
     """
-    Aggregate per-node stats/live-* samples into a single throughput/latency vs time curve.
-    Expects live file line format:
-      elapsedSec throughputView latencyView view
+    Aggregate per-node stats/live-* into throughput (committed tx/s) vs time.
+    Server counts each block's non-dummy transaction count (Block::getSize, up to batch)
+    at the commit/execute entry, before application execution.
+
+    Per-replica line format (current server):
+      elapsedSec throughput_tx_per_sec view
+    Legacy lines with an extra latency column are still accepted (throughput is always field 1).
+
+    If reference_replica_id is set, only that replica's live-* files are used (single curve).
+    Otherwise exclude_replica_ids (if non-empty) lists replica ids to omit from the mean
+    (e.g. crashed node in fault experiments).
+
+    aggregate_median: if True, use median across replicas per time bucket instead of mean.
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    # live samples are written into stats/ directory; file names are like live-<id>-<seconds>
     live_files = glob.glob(os.path.join(stats_directory, "live-*"))
+    if reference_replica_id is not None:
+        live_files = [
+            fp
+            for fp in live_files
+            if _live_file_replica_id(fp) == reference_replica_id
+        ]
+        if not live_files:
+            print(
+                "no live-* files for reference replica",
+                reference_replica_id,
+                "under",
+                stats_directory,
+            )
+            return
+    elif exclude_replica_ids:
+        excl = set(exclude_replica_ids)
+        live_files = [fp for fp in live_files if _live_file_replica_id(fp) not in excl]
+        if not live_files:
+            print(
+                "after excluding replicas",
+                sorted(excl),
+                "no live-* files left under",
+                stats_directory,
+            )
+            return
+
     if not live_files:
         print("no live-* files found under", stats_directory)
         return
 
-    samples_by_t = {}  # elapsed seconds (rounded) -> list[(thr,lat)]
+    if reference_replica_id is not None:
+        print(f"[live-plot] reference replica {reference_replica_id}: {len(live_files)} live file(s)")
+    elif exclude_replica_ids:
+        print(
+            f"[live-plot] excluding replicas {sorted(set(exclude_replica_ids))}: "
+            f"{len(live_files)} live file(s)"
+        )
+    if aggregate_median:
+        print("[live-plot] aggregating per time bucket with median (not mean)")
+
+    samples_by_t = {}  # elapsed seconds (rounded) -> list of throughput samples
     for fp in live_files:
         try:
             with open(fp, "r") as f:
@@ -976,17 +1180,15 @@ def plot_live_throughput_latency(stats_directory: str, out_png: str, out_csv: st
                     if not line:
                         continue
                     parts = line.split()
-                    if len(parts) < 3:
+                    if len(parts) < 2:
                         continue
                     try:
                         t = float(parts[0])
-                        # Round to 2 decimals for stable aggregation (0.1s cadence -> 1 decimal).
-                        t_key = round(t, 2)
                         thr = float(parts[1])
-                        lat = float(parts[2])
+                        t_key = round(t, 2)
                     except ValueError:
                         continue
-                    samples_by_t.setdefault(t_key, []).append((thr, lat))
+                    samples_by_t.setdefault(t_key, []).append(thr)
         except FileNotFoundError:
             continue
 
@@ -996,30 +1198,36 @@ def plot_live_throughput_latency(stats_directory: str, out_png: str, out_csv: st
 
     secs = sorted(samples_by_t.keys())
     thr_avg = []
-    lat_avg = []
     for s in secs:
-        pairs = samples_by_t[s]
-        thr_avg.append(sum(x[0] for x in pairs) / len(pairs))
-        lat_avg.append(sum(x[1] for x in pairs) / len(pairs))
+        thrs = samples_by_t[s]
+        if aggregate_median:
+            thr_avg.append(statistics.median(thrs))
+        else:
+            thr_avg.append(sum(thrs) / len(thrs))
 
-    # Write CSV for debugging/analysis
     with open(out_csv, "w") as f:
-        f.write("sec throughput_tx_per_sec latency_p99_ms\n")
-        for s, thr, lat in zip(secs, thr_avg, lat_avg):
-            f.write(f"{s} {thr} {lat}\n")
+        f.write("sec throughput_tx_per_sec\n")
+        for s, thr in zip(secs, thr_avg):
+            f.write(f"{s} {thr}\n")
 
-    # Plot (two subplots)
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+    fig, ax1 = plt.subplots(1, 1, figsize=(10, 4))
     ax1.plot(secs, thr_avg, marker="o", linewidth=1)
-    ax1.set_ylabel("throughput (tx/s)")
+    ax1.set_xlabel("elapsed seconds")
+    ax1.set_ylabel("throughput (committed tx/s)")
     ax1.grid(True, linestyle="--", alpha=0.4)
 
-    ax2.plot(secs, lat_avg, marker="o", color="orange", linewidth=1)
-    ax2.set_xlabel("elapsed seconds")
-    ax2.set_ylabel("latency p99 (ms)")
-    ax2.grid(True, linestyle="--", alpha=0.4)
-
-    fig.suptitle(f"Live throughput(tx/s) / latency p99(ms) curve ({os.path.basename(stats_directory.rstrip(os.sep))})")
+    curve_note = ""
+    if reference_replica_id is not None:
+        curve_note = f" [replica {reference_replica_id} only]"
+    elif exclude_replica_ids:
+        curve_note = f" [excluded replicas {sorted(set(exclude_replica_ids))}]"
+    if aggregate_median:
+        curve_note += " [median]"
+    else:
+        curve_note += " [mean]"
+    fig.suptitle(
+        f"Live throughput (tx/s) ({os.path.basename(stats_directory.rstrip(os.sep))}){curve_note}"
+    )
     fig.tight_layout()  # type: ignore[attr-defined]
     fig.savefig(out_png)  # type: ignore[attr-defined]
     plt.close(fig)
@@ -1214,13 +1422,13 @@ def mkParams(protocol,debug,constFactor,numFaults,numTrans,payloadSize,pct):
         else:
             f.write("#define BASIC_HYBRID_TEE\n")
     elif protocol == "Chained-HybridTEE":
-        f.write("#define CHAINED_CHEAP_AND_QUICK\n")
+        f.write("#define CHAINED_HYBRID_TEE\n")
     elif protocol == "Achilles":
         f.write("#define ACHILLES\n")
     elif protocol == "FlexiBFT":
-        f.write("#define CHAINED_CHEAP_AND_QUICK\n")
+        f.write("#define CHAINED_HYBRID_TEE\n")
     elif protocol == "Damysus":
-        f.write("#define CHAINED_CHEAP_AND_QUICK\n")
+        f.write("#define CHAINED_HYBRID_TEE\n")
     elif protocol == "Oneshot":
         f.write("#define BASIC_ONEP\n")
     elif protocol == "Hotstuff":
@@ -1264,6 +1472,7 @@ def experiment_local(
     local_opdist=0,
     print_vals_means=False,
     cutoff_sec=None,
+    stats_summary_label=None,
 ):
     """
     Local run aligned with experiments.py: execute() + computeStats() + computeAvgStats() loop.
@@ -1297,6 +1506,7 @@ def experiment_local(
     e2e_lat_p99 = []
     good_values = 0
 
+    clear_local_client_logs()
     for rep in range(repeats):
         # Fault-mode runs may need more time after killing one replica.
         # Keep user-provided --cutoff-sec as highest priority; otherwise use
@@ -1454,7 +1664,7 @@ def experiment_local(
         # Live curve: aggregate stats/live-* written during this repeat.
         live_out_png = str(PROJECT_ROOT / "stats" / f"live-curve-{pro_dir}-rep{rep}.png")
         live_out_csv = str(PROJECT_ROOT / "stats" / f"live-curve-{pro_dir}-rep{rep}.csv")
-        plot_live_throughput_latency(stats_directory, live_out_png, live_out_csv)
+        plot_live_throughput(stats_directory, live_out_png, live_out_csv)
 
         # Fault experiments may end before recordStats() writes vals/done; in that case,
         # fall back to the last live curve point so you still get throughput/latency output.
@@ -1469,15 +1679,15 @@ def experiment_local(
                             continue
                         last = line
                 if last:
-                    _sec, thr_s, lat_s = last.split()
-                    throughput_view = float(thr_s)
-                    latency_view = float(lat_s)
+                    parts = last.split()
+                    if len(parts) >= 2:
+                        throughput_view = float(parts[1])
             except Exception:
                 pass
 
-        # For fault-injection runs, we mainly care about throughput/latency.
+        # For fault-injection runs, we mainly care about throughput (live curve is tx/s only).
         # Other counters (handle/crypto-*) may legitimately drop to 0 after a crash.
-        good_cond = throughput_view > 0 and latency_view > 0
+        good_cond = throughput_view > 0
 
         if good_cond:
             throughput_views.append(throughput_view)
@@ -1548,13 +1758,17 @@ def experiment_local(
     print("num complete runs=", repeats)
     print("num good stat runs=", good_values)
 
-    with open(stats_txt, 'a') as f:
-        f.write(
-            f"{pro_dir}, thr_view={avg_throughput}, lat_view={avg_latency}, "
-            f"e2e_reply_tps={avg_e2e_reply_tps}, e2e_lat_avg={avg_e2e_lat_avg_ms}, "
-            f"e2e_lat_p50={avg_e2e_lat_p50_ms}, e2e_lat_p95={avg_e2e_lat_p95_ms}, "
-            f"e2e_lat_p99={avg_e2e_lat_p99_ms}, good={good_values}/{repeats},\n"
-        )
+    if stats_summary_label is None:
+        with open(stats_txt, 'a') as f:
+            f.write(
+                f"{pro_dir}, thr_view={avg_throughput}, lat_view={avg_latency}, "
+                f"e2e_reply_tps={avg_e2e_reply_tps}, e2e_lat_avg={avg_e2e_lat_avg_ms}, "
+                f"e2e_lat_p50={avg_e2e_lat_p50_ms}, e2e_lat_p95={avg_e2e_lat_p95_ms}, "
+                f"e2e_lat_p99={avg_e2e_lat_p99_ms}, good={good_values}/{repeats},\n"
+            )
+    else:
+        vr1, vr2 = calculate_mean_of_values(stats_directory, silent=True)
+        append_wan_stats_summary_row(stats_summary_label, vr1, vr2)
     print(
         pro_dir,
         "thr_view=",
@@ -1590,6 +1804,10 @@ def experiment_fault_local(
     local_opdist=0,
     print_vals_means=False,
     cutoff_sec=None,
+    live_plot_reference_replica=None,
+    live_plot_exclude_fault_node=True,
+    live_plot_aggregate_median=False,
+    stats_summary_label=None,
 ):
     """
     Local experiment with one replica crash during execution.
@@ -1619,6 +1837,7 @@ def experiment_fault_local(
     e2e_lat_p99 = []
     good_values = 0
 
+    clear_local_client_logs()
     for rep in range(repeats):
         run_cutoff = int(cutoff_sec) if cutoff_sec is not None else cutOffBound
         print(
@@ -1792,7 +2011,18 @@ def experiment_fault_local(
 
         live_out_png = str(PROJECT_ROOT / "stats" / f"live-curve-{pro_dir}-rep{rep}-fault.png")
         live_out_csv = str(PROJECT_ROOT / "stats" / f"live-curve-{pro_dir}-rep{rep}-fault.csv")
-        plot_live_throughput_latency(stats_directory, live_out_png, live_out_csv)
+        plot_live_throughput(
+            stats_directory,
+            live_out_png,
+            live_out_csv,
+            reference_replica_id=live_plot_reference_replica,
+            exclude_replica_ids=(
+                {dead_node_id}
+                if live_plot_exclude_fault_node and live_plot_reference_replica is None
+                else None
+            ),
+            aggregate_median=live_plot_aggregate_median,
+        )
 
         # If fault kills consensus before recordStats() writes vals/done,
         # fall back to the last live curve point so we still output throughput/latency.
@@ -1807,15 +2037,15 @@ def experiment_fault_local(
                             continue
                         last = line
                 if last:
-                    _sec, thr_s, lat_s = last.split()
-                    throughput_view = float(thr_s)
-                    latency_view = float(lat_s)
+                    parts = last.split()
+                    if len(parts) >= 2:
+                        throughput_view = float(parts[1])
             except Exception:
                 pass
 
-        # For fault-injection runs, we mainly care about throughput/latency.
+        # For fault-injection runs, we mainly care about throughput (live curve is tx/s only).
         # Other counters (handle/crypto-*) may legitimately drop to 0 after a crash.
-        good_cond = throughput_view > 0 and latency_view > 0
+        good_cond = throughput_view > 0
 
         if good_cond:
             throughput_views.append(throughput_view)
@@ -1886,14 +2116,18 @@ def experiment_fault_local(
     print("num complete runs=", repeats)
     print("num good stat runs=", good_values)
 
-    with open(stats_txt, "a") as f:
-        f.write(
-            f"{pro_dir}, thr_view={avg_throughput}, lat_view={avg_latency}, "
-            f"e2e_reply_tps={avg_e2e_reply_tps}, e2e_lat_avg={avg_e2e_lat_avg_ms}, "
-            f"e2e_lat_p50={avg_e2e_lat_p50_ms}, e2e_lat_p95={avg_e2e_lat_p95_ms}, "
-            f"e2e_lat_p99={avg_e2e_lat_p99_ms}, good={good_values}/{repeats}, "
-            f"fault_node={dead_node_id}, kill_after={kill_after_sec},\n"
-        )
+    if stats_summary_label is None:
+        with open(stats_txt, "a") as f:
+            f.write(
+                f"{pro_dir}, thr_view={avg_throughput}, lat_view={avg_latency}, "
+                f"e2e_reply_tps={avg_e2e_reply_tps}, e2e_lat_avg={avg_e2e_lat_avg_ms}, "
+                f"e2e_lat_p50={avg_e2e_lat_p50_ms}, e2e_lat_p95={avg_e2e_lat_p95_ms}, "
+                f"e2e_lat_p99={avg_e2e_lat_p99_ms}, good={good_values}/{repeats}, "
+                f"fault_node={dead_node_id}, kill_after={kill_after_sec},\n"
+            )
+    else:
+        vr1, vr2 = calculate_mean_of_values(stats_directory, silent=True)
+        append_wan_stats_summary_row(stats_summary_label, vr1, vr2)
     print(
         pro_dir,
         "thr_view=",
@@ -1909,6 +2143,235 @@ def experiment_fault_local(
     )
 
 
+def experiment_fault_cloud(
+    protocol,
+    debug,
+    batchsize,
+    payload,
+    faults,
+    totaltee,
+    pct,
+    *,
+    num_views=10,
+    num_cl_trans=1,
+    num_clients=1,
+    cl_sleep_us=50,
+    local_opdist=0,
+    client_rep=0,
+    kv_set=None,
+    kv_get=None,
+    kv_del=None,
+    kv_keys=None,
+    kv_vlen=None,
+    dead_node_id: int = 1,
+    kill_after_sec: float = 2.0,
+    view_timeout=None,
+    cutoff_sec=None,
+    stats_poll_interval: float = 0.5,
+    live_plot_reference_replica=None,
+    live_plot_exclude_fault_node=True,
+    live_plot_aggregate_median=False,
+    stats_summary_label=None,
+):
+    """
+    Cloud/SSH cluster: one replica is killed and stays down until experiment cleanup while live
+    server stats are pulled to this machine. plot_live_throughput() aggregates stats/live-* across
+    replicas into mean throughput vs time (same as local --fault-local).
+
+    Typical HybridTEE WAN preset (example):
+      --p0 --faults 8 --totaltee 9 --fault-cloud --view-timeout 2
+    """
+    kv_set = kv_set_ratio if kv_set is None else kv_set
+    kv_get = kv_get_ratio if kv_get is None else kv_get
+    kv_del = kv_del_ratio if kv_del is None else kv_del
+    kv_keys = kv_keyspace if kv_keys is None else kv_keys
+    kv_vlen = kv_value_len if kv_vlen is None else kv_vlen
+
+    pro_dir = f"{protocol}_{faults}_{totaltee}_{payload}_{batchsize}_{pct}"
+    factor = protocol_factor(protocol)
+    total = num_replicas(factor, faults)
+
+    servers = read_servers(total, addresses)
+    by_id = {rid: (rid, h, p1, p2) for rid, h, p1, p2 in servers}
+    if dead_node_id not in by_id:
+        raise ValueError(f"dead_node_id={dead_node_id} not in config (0..{total-1})")
+    dead_host = by_id[dead_node_id][1]
+
+    ips_set = set()
+    for server in servers:
+        ips_set.add(server[1])
+    ips = list(ips_set)
+
+    if debug:
+        files_to_copy = [
+            str(PROJECT_ROOT / "config"),
+            str(PROJECT_ROOT / "server"),
+            str(PROJECT_ROOT / "client"),
+        ]
+    else:
+        files_to_copy = [
+            str(PROJECT_ROOT / "config"),
+            str(PROJECT_ROOT / "sgxserver"),
+            str(PROJECT_ROOT / "sgxclient"),
+            str(PROJECT_ROOT / "enclave.so"),
+            str(PROJECT_ROOT / "enclave.signed.so"),
+            str(PROJECT_ROOT / "sgxkeys"),
+        ]
+
+    clear_local_stats()
+    clear_remote_server_out_logs()
+    clear_local_client_logs()
+    ssh_clear_repo_out_logs_on_hosts(ips)
+    scp_files_to_nodes(ips, files_to_copy)
+
+    start_remote_redis_for_servers(servers)
+
+    vc = float(timeout if view_timeout is None else view_timeout)
+    print(
+        "[fault-cloud] view-timeout (server argv, seconds)=",
+        vc,
+        "(Handler uses this for view-change timer; raise toward ~2s on WAN with ~100ms RTT)",
+    )
+
+    completion_set, lock = start_all_sgxservers(
+        servers,
+        debug,
+        factor,
+        faults,
+        totaltee,
+        num_views,
+        local_opdist,
+        view_timeout=view_timeout,
+        clear_remote_stats=True,
+    )
+
+    stop_poll = threading.Event()
+    poll_thread = threading.Thread(
+        target=poll_remote_stats_forever,
+        args=(ips, stop_poll, stats_poll_interval),
+        daemon=True,
+    )
+    poll_thread.start()
+
+    wait_before_client = 5 + int(math.ceil(math.log(faults, 2)))
+    time.sleep(wait_before_client)
+
+    client_procs = []
+    for client_id in range(num_clients):
+        client_proc = local_exec_client(
+            debug,
+            factor,
+            faults,
+            totaltee,
+            num_cl_trans,
+            client_id,
+            cl_sleep_us,
+            client_rep,
+            kv_set,
+            kv_get,
+            kv_del,
+            kv_keys,
+            kv_vlen,
+        )
+        client_procs.append(client_proc)
+
+    def fault_worker():
+        time.sleep(max(0.0, float(kill_after_sec)))
+        print(
+            f"[fault-cloud] killing replica {dead_node_id} on {dead_host} "
+            f"(t≈{kill_after_sec}s after client start)"
+        )
+        ssh_kill_sgxserver_on_host(dead_host, replica_id=dead_node_id)
+
+    fault_thread = threading.Thread(target=fault_worker, daemon=True)
+    fault_thread.start()
+
+    run_cutoff = float(cutoff_sec) if cutoff_sec is not None else float(timeoutTime)
+    deadline = time.time() + run_cutoff
+    client_grace_after_done = 15.0
+    while time.time() < deadline:
+        if client_procs and all(p.poll() is not None for p in client_procs):
+            break
+        time.sleep(0.5)
+
+    if client_procs and all(p.poll() is not None for p in client_procs):
+        time.sleep(client_grace_after_done)
+
+    fault_thread.join(timeout=max(30.0, float(kill_after_sec) + 30.0))
+
+    stop_poll.set()
+    poll_thread.join(timeout=30.0)
+
+    print("[fault-cloud] stopping remaining remote servers (close.py)")
+    stop_remote_server()
+    time.sleep(2.0)
+
+    wait_local_client_procs(client_procs, float(timeoutTime))
+    close_client_log_handles(client_procs)
+
+    scp_stats_from_nodes(ips, str(PROJECT_ROOT) + os.sep, remote_stats_dir() + os.sep)
+    clear_local_out_logs()
+    scp_out_logs_from_nodes(ips, str(out_dir))
+
+    stats_directory = str(stats_dir) + os.sep
+    live_out_png = str(out_dir / f"fault-cloud-live-{pro_dir}.png")
+    live_out_csv = str(out_dir / f"fault-cloud-live-{pro_dir}.csv")
+    plot_live_throughput(
+        stats_directory,
+        live_out_png,
+        live_out_csv,
+        reference_replica_id=live_plot_reference_replica,
+        exclude_replica_ids=(
+            {dead_node_id}
+            if live_plot_exclude_fault_node and live_plot_reference_replica is None
+            else None
+        ),
+        aggregate_median=live_plot_aggregate_median,
+    )
+
+    r1, r2 = calculate_mean_of_values(stats_directory)
+    cp_client_stats()
+    e2e_stats = parse_client_e2e_stats(stats_directory)
+    if e2e_stats is not None:
+        print(
+            "cloud fault client e2e:",
+            "reply_ktps=",
+            e2e_stats["reply_throughput_ktps"],
+            "avg_ms=",
+            e2e_stats["e2e_latency_avg_ms"],
+        )
+        er = e2e_stats["reply_throughput_ktps"]
+        ea = e2e_stats["e2e_latency_avg_ms"]
+    else:
+        print("[warn] no stats/client-e2e-* parsed")
+        er = ea = 0.0
+
+    print(
+        pro_dir,
+        "fault-cloud server_vals_thr_mean=",
+        r1,
+        "server_vals_lat_mean=",
+        r2,
+        "live_plot=",
+        live_out_png,
+        "dead_node=",
+        dead_node_id,
+        "kill_after_sec=",
+        kill_after_sec,
+        "view_timeout=",
+        vc,
+    )
+
+    if stats_summary_label is None:
+        with open(stats_txt, "a") as f:
+            f.write(
+                f"{pro_dir}, fault-cloud, server_vals_thr_mean={r1}, server_vals_lat_mean={r2}, "
+                f"e2e_reply_tps={er}, e2e_lat_avg_ms={ea}, "
+                f"dead_node={dead_node_id}, kill_after={kill_after_sec}, "
+                f"view_timeout={vc},\n"
+            )
+    else:
+        append_wan_stats_summary_row(stats_summary_label, r1, r2)
 
 
 #conduct a experiment
@@ -1932,6 +2395,8 @@ def experiment(
     kv_del=None,
     kv_keys=None,
     kv_vlen=None,
+    view_timeout=None,
+    stats_summary_label=None,
 ):
     """
     Remote cluster run aligned with experiment_local(): Redis per replica, server argv includes
@@ -1972,6 +2437,9 @@ def experiment(
             str(PROJECT_ROOT / "sgxkeys"),
         ]
     rm_local_stats()
+    clear_remote_server_out_logs()
+    clear_local_client_logs()
+    ssh_clear_repo_out_logs_on_hosts(ips)
     scp_files_to_nodes(ips, files_to_copy)
 
     # Same ordering as experiment_local: Redis before replicas.
@@ -1986,6 +2454,7 @@ def experiment(
         totaltee,
         num_views,
         local_opdist,
+        view_timeout=view_timeout,
     )
     print("start")
     wait_before_client = 5 + int(math.ceil(math.log(faults, 2)))
@@ -2017,7 +2486,7 @@ def experiment(
     close_client_log_handles(client_procs)
 
     # get data from nodes
-    scp_stats_from_nodes(ips, str(PROJECT_ROOT) + os.sep, str(stats_dir) + os.sep)
+    scp_stats_from_nodes(ips, str(PROJECT_ROOT) + os.sep, remote_stats_dir() + os.sep)
     clear_local_out_logs()
     scp_out_logs_from_nodes(ips, str(out_dir))
 
@@ -2058,17 +2527,20 @@ def experiment(
         ea,
     )
 
-    with open(stats_txt, 'a') as f:
-        if e2e_stats is not None:
-            f.write(
-                f"{pro_dir}, server_vals_thr_mean={r1}, server_vals_lat_mean={r2}, "
-                f"e2e_reply_tps={er}, e2e_lat_avg_ms={ea},\n"
-            )
-        else:
-            f.write(
-                f"{pro_dir}, server_vals_thr_mean={r1}, server_vals_lat_mean={r2}, "
-                f"e2e_reply_tps=0, e2e_lat_avg_ms=0, e2e_missing=1,\n"
-            )
+    if stats_summary_label is None:
+        with open(stats_txt, 'a') as f:
+            if e2e_stats is not None:
+                f.write(
+                    f"{pro_dir}, server_vals_thr_mean={r1}, server_vals_lat_mean={r2}, "
+                    f"e2e_reply_tps={er}, e2e_lat_avg_ms={ea},\n"
+                )
+            else:
+                f.write(
+                    f"{pro_dir}, server_vals_thr_mean={r1}, server_vals_lat_mean={r2}, "
+                    f"e2e_reply_tps=0, e2e_lat_avg_ms=0, e2e_missing=1,\n"
+                )
+    else:
+        append_wan_stats_summary_row(stats_summary_label, r1, r2)
 
 
     # Wait and execute sgxclient on the host with id:0
@@ -2106,16 +2578,53 @@ def main():
     parser.add_argument('--opdist',type=int,default=0,help='server argv opdist (default 0, same as experiments.py)',)
     parser.add_argument('--print-vals-mean',action='store_true',help='also print calculate_mean_of_values (first two cols) after each repeat',)
     parser.add_argument('--cutoff-sec',type=int,default=None,help='max local wait time in seconds before forced stop (default uses built-in cutOffBound=60)',)
-    parser.add_argument('--kv-set-ratio', type=int, default=30, help='KV workload SET ratio (percentage-like weight)')
-    parser.add_argument('--kv-get-ratio', type=int, default=60, help='KV workload GET ratio (percentage-like weight)')
-    parser.add_argument('--kv-del-ratio', type=int, default=10, help='KV workload DEL ratio (percentage-like weight)')
+    parser.add_argument('--kv-set-ratio', type=int, default=100, help='KV workload SET ratio (percentage-like weight)')
+    parser.add_argument('--kv-get-ratio', type=int, default=0, help='KV workload GET ratio (percentage-like weight)')
+    parser.add_argument('--kv-del-ratio', type=int, default=0, help='KV workload DEL ratio (percentage-like weight)')
     parser.add_argument('--kv-keyspace', type=int, default=1000, help='KV workload keyspace size')
     parser.add_argument('--kv-value-len', type=int, default=16, help='KV workload SET value length')
     # Local fault injection (one replica crash during local experiment).
     parser.add_argument('--fault-local',action='store_true',help='simulate one replica crash during local run (kills a server process mid-run)',)
     parser.add_argument('--fault-node-id',type=int,default=1,help='replica index to kill in --fault-local mode (default 1)',)
     parser.add_argument('--fault-after-sec', type=float, default=2.0, help='seconds after starting the client to kill the fault node (default 2.0)',)
+    parser.add_argument('--view-timeout',type=float,default=None,help='view-change timeout in seconds (server argv; default: built-in 5s; ~2s is reasonable on WAN with ~100ms RTT)',)
+    # Cloud / SSH fault injection (mirrors --fault-local but uses SSH + periodic stats pull).
+    parser.add_argument('--fault-cloud',action='store_true',help='remote cluster: kill one replica mid-run (no restart), poll stats/live-* from all nodes, plot mean throughput (omit --local)',)
+    parser.add_argument(
+        '--live-plot-reference-replica',
+        type=int,
+        default=None,
+        metavar='ID',
+        dest='live_plot_reference_replica',
+        help='live CSV/PNG: use only stats/live-<ID>-* (single replica curve; overrides exclude-fault)',
+    )
+    parser.add_argument(
+        '--live-plot-include-fault-node',
+        action='store_true',
+        help='live CSV/PNG: include crashed replica when averaging (fault-cloud/--fault-local only; default: exclude)',
+    )
+    parser.add_argument(
+        '--live-plot-median',
+        action='store_true',
+        dest='live_plot_median',
+        help='live CSV/PNG: median across replicas per sec bucket (reduces mean oscillation when replicas desync after fault)',
+    )
+    parser.add_argument(
+        '--stats-summary-label',
+        type=str,
+        default=None,
+        metavar='LABEL',
+        dest='stats_summary_label',
+        help='When set: stats.txt gets only one appended line per run '
+        '"LABEL, server_vals_thr_mean, server_vals_lat_mean" (no Start/pro_dir lines). '
+        'When unset: keep legacy stats.txt lines from experiment paths.',
+    )
     args = parser.parse_args()
+
+    if getattr(args, "fault_cloud", False) and args.local:
+        parser.error("--fault-cloud is only for remote runs (do not pass --local)")
+    if getattr(args, "fault_cloud", False) and getattr(args, "fault_local", False):
+        parser.error("use only one of --fault-cloud and --fault-local")
 
     global kv_set_ratio, kv_get_ratio, kv_del_ratio, kv_keyspace, kv_value_len
     kv_set_ratio = max(0, args.kv_set_ratio)
@@ -2124,8 +2633,9 @@ def main():
     kv_keyspace = max(1, args.kv_keyspace)
     kv_value_len = max(1, args.kv_value_len)
 
-    with open(stats_txt, 'a') as f:
-        f.write(f"Start, numviews: {args.views}\n")
+    if args.stats_summary_label is None:
+        with open(stats_txt, 'a') as f:
+            f.write(f"Start, numviews: {args.views}\n")
 
     if args.p0:
         Protocol = "HybridTEE"
@@ -2176,6 +2686,10 @@ def main():
                 local_opdist=args.opdist,
                 print_vals_means=args.print_vals_mean,
                 cutoff_sec=args.cutoff_sec,
+                live_plot_reference_replica=args.live_plot_reference_replica,
+                live_plot_exclude_fault_node=not args.live_plot_include_fault_node,
+                live_plot_aggregate_median=args.live_plot_median,
+                stats_summary_label=args.stats_summary_label,
             )
         else:
             experiment_local(
@@ -2195,22 +2709,49 @@ def main():
                 local_opdist=args.opdist,
                 print_vals_means=args.print_vals_mean,
                 cutoff_sec=args.cutoff_sec,
+                stats_summary_label=args.stats_summary_label,
             )
     else:
-        experiment(
-            Protocol,
-            args.debug,
-            args.batchsize,
-            args.payload,
-            args.faults,
-            args.totaltee,
-            args.pct,
-            num_views=args.views,
-            num_cl_trans=args.cl_trans,
-            num_clients=max(1, args.cl_num),
-            cl_sleep_us=max(0, args.cl_sleep),
-            local_opdist=args.opdist,
-        )
+        if getattr(args, "fault_cloud", False):
+            experiment_fault_cloud(
+                Protocol,
+                args.debug,
+                args.batchsize,
+                args.payload,
+                args.faults,
+                args.totaltee,
+                args.pct,
+                num_views=args.views,
+                num_cl_trans=args.cl_trans,
+                num_clients=max(1, args.cl_num),
+                cl_sleep_us=max(0, args.cl_sleep),
+                local_opdist=args.opdist,
+                dead_node_id=args.fault_node_id,
+                kill_after_sec=args.fault_after_sec,
+                view_timeout=args.view_timeout,
+                cutoff_sec=args.cutoff_sec,
+                live_plot_reference_replica=args.live_plot_reference_replica,
+                live_plot_exclude_fault_node=not args.live_plot_include_fault_node,
+                live_plot_aggregate_median=args.live_plot_median,
+                stats_summary_label=args.stats_summary_label,
+            )
+        else:
+            experiment(
+                Protocol,
+                args.debug,
+                args.batchsize,
+                args.payload,
+                args.faults,
+                args.totaltee,
+                args.pct,
+                num_views=args.views,
+                num_cl_trans=args.cl_trans,
+                num_clients=max(1, args.cl_num),
+                cl_sleep_us=max(0, args.cl_sleep),
+                local_opdist=args.opdist,
+                view_timeout=args.view_timeout,
+                stats_summary_label=args.stats_summary_label,
+            )
 
 
 if __name__ == "__main__":

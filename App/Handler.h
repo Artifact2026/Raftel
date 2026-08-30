@@ -2,6 +2,7 @@
 #define HANDLER_H
 
 
+#include <cstdint>
 #include <map>
 #include <set>
 #include <deque>
@@ -24,13 +25,13 @@
 
 // ------------------------------------
 // SGX related stuff
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 //
 #include "Enclave_u.h"
 #include "sgx_urts.h"
 #include "sgx_utils/sgx_utils.h"
 //
-#elif defined(BASIC_HYBRID_TEE_DEBUG) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
+#elif defined(BASIC_HYBRID_TEE_DEBUG) || defined(CHAINED_HYBRID_TEE_DEBUG)
 //
 #include "TrustedFun.h"
 #include "TrustedAccum.h"
@@ -39,7 +40,7 @@
 #include "TrustedChComb.h"
 //
 #else
-#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_CHEAP_AND_QUICK, BASIC_HYBRID_TEE_DEBUG, CHAINED_CHEAP_AND_QUICK_DEBUG."
+#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_HYBRID_TEE, BASIC_HYBRID_TEE_DEBUG, CHAINED_HYBRID_TEE_DEBUG."
 #endif
 // ------------------------------------
 
@@ -121,13 +122,15 @@ class Handler {
   long long lastLiveElapsedMs = -1; // de-dup for live samples (avoid duplicate writes within same ms)
   struct LiveAggSample {
     long long elapsedMs;
-    unsigned int execViews;
-    double totalViewMicros;
+    std::uint64_t committedTx;
   };
   std::deque<LiveAggSample> liveAggHistory;
-  static constexpr long long liveWindowMs = 1000;
+  std::uint64_t liveCommittedTxCount{0};
+  static constexpr long long liveWindowMs = 2000;
   static constexpr size_t liveWindowMaxSamples = 10;
   View timerView; // view at which the timer was started
+  /** Nominal leaders (view % pool) blamed on view-timeout; skipped in getLeaderOf rotation. */
+  std::set<unsigned int> skippedLeaders;
   //new 
   std::set<View> processedNewViews;
   std::set<View> processedCommit;
@@ -185,6 +188,8 @@ class Handler {
   std::string nfo();
 
   bool timeToStop();
+  /** Live throughput: add block.getSize() (non-dummy tx in committed block) at commit boundary. */
+  void addLiveCommittedTxsAtCommit(View propView, Hash blockHash);
   void recordLiveStats();
   void recordStats();
   void setTimer();

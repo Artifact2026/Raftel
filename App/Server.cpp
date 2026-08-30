@@ -136,7 +136,7 @@ int main(int argc, char const *argv[]) {
                    sizeof(MsgLdrPrepareComb),
                    sizeof(MsgPrepareComb)});
                   //  sizeof(MsgPreCommitComb)});
-#elif defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
+#elif defined(CHAINED_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE_DEBUG)
   size = std::max({size,
                    sizeof(MsgNewViewChComb),
                    sizeof(MsgLdrPrepareChComb),

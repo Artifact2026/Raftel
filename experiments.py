@@ -363,10 +363,10 @@ class Protocol(Enum):
     ONEPC     = "BASIC_ONEPC"              # 1+1/2 phase Damysus (case 3)
     ONEPD     = "BASIC_ONEPD"              # 1+1/2 phase Damysus (case 4)
     CHBASE    = "CHAINED_BASELINE"         # chained baseline
-    CHCOMB    = "CHAINED_CHEAP_AND_QUICK"  # chained Damysus
+    CHCOMB    = "CHAINED_HYBRID_TEE"  # chained Damysus
     ## Debug versions
     QUICKDBG  = "BASIC_QUICK_DEBUG"
-    CHCOMBDBG = "CHAINED_CHEAP_AND_QUICK_DEBUG" # chained Damysus - debug version
+    CHCOMBDBG = "CHAINED_HYBRID_TEE_DEBUG" # chained Damysus - debug version
 
     # HYBRID    = "HYBRID_TEE"               # Hybrid TEE
     # CHHYBRID  = "CHAINED_HYBRID_TEE"       # chainedHybrid TEE
@@ -2077,11 +2077,11 @@ def updateDictionaries(protVal,numFaults,numDeads,pointVal,dBase,dCheap,dQuick,d
         (val,num) = dChBase.get(key,([],0))
         val.append(float(pointVal))
         dChBase.update({key:(val,num+1)})
-    if protVal == "CHAINED_CHEAP_AND_QUICK":
+    if protVal == "CHAINED_HYBRID_TEE":
         (val,num) = dChComb.get(key,([],0))
         val.append(float(pointVal))
         dChComb.update({key:(val,num+1)})
-    if protVal == "CHAINED_CHEAP_AND_QUICK_DEBUG":
+    if protVal == "CHAINED_HYBRID_TEE_DEBUG":
         (val,num) = dChComb.get(key,([],0))
         val.append(float(pointVal))
         dChComb.update({key:(val,num+1)})
@@ -2449,11 +2449,11 @@ def createTVLplot(cFile,instances):
                 TChBase.append(throughput)
                 LChBase.append(latency)
                 aChBase.append(sleep)
-            if protVal == "CHAINED_CHEAP_AND_QUICK":
+            if protVal == "CHAINED_HYBRID_TEE":
                 TChComb.append(throughput)
                 LChComb.append(latency)
                 aChComb.append(sleep)
-            if protVal == "CHAINED_CHEAP_AND_QUICK_DEBUG":
+            if protVal == "CHAINED_HYBRID_TEE_DEBUG":
                 TChComb.append(throughput)
                 LChComb.append(latency)
                 aChComb.append(sleep)

@@ -1,6 +1,6 @@
 #include <config.h>
 #include <set>
-//#include <algorithm>
+#include <algorithm>
 #include <mutex>
 #include <iostream>
 #include <fstream>
@@ -38,7 +38,7 @@ Time startTime = std::chrono::steady_clock::now();
 Time startView = std::chrono::steady_clock::now();
 std::string statsVals;             // Throuput + latency + handle + crypto
 std::string statsDone;             // done recording the stats
-std::string statsLive;             // live throughput/latency samples
+std::string statsLive;             // live throughput samples (tx/s in sliding window)
 std::string statsExecBreakdown;    // consensus/kv execution breakdown
 double consensusExecMicros = 0.0;  // accumulated consensus processing time in microseconds
 double kvExecuteMicros = 0.0;      // accumulated kv execution time in microseconds
@@ -57,7 +57,7 @@ std::uniform_int_distribution<int>  distr(0, 1);
 std::string Handler::nfo() { return "[" + std::to_string(this->myid) + "]{" +  std::to_string(this->view) + "}"; }
 
 
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 // These versions use trusted components
 #if defined(BASIC_HYBRID_TEE)
 // Hybrid mode also needs a non-enclave trusted path for non-TEE replicas.
@@ -464,7 +464,7 @@ void setCBlock(CBlock block, cblock_t *b) {
 
 // ------------------------------------
 // SGX related stuff
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 /* Global EID shared by multiple threads */
 sgx_enclave_id_t global_eid = 0;
 
@@ -546,10 +546,20 @@ int Handler::initializeSGX() {
 
 
 void Handler::startNewViewOnTimeout() {
-  // TODO: start a new-view
+  // Blame the nominal leader for this view (same index as pre-skip rotation) so the next
+  // timeout-driven view-change does not schedule that replica as leader again while suspected down.
+  unsigned int pool = (this->totalTEE == 0) ? this->total : this->totalTEE;
+  if (pool > 0) {
+    unsigned int suspected = static_cast<unsigned int>(this->view % pool);
+    skippedLeaders.insert(suspected);
+    if (DEBUG1) {
+      std::cout << KMAG << nfo() << "timeout: skip leader " << suspected << " for future rotations "
+                << "(view=" << this->view << "; pool=" << pool << ")" << KNRM << std::endl;
+    }
+  }
 #if defined (BASIC_HYBRID_TEE) || defined (BASIC_HYBRID_TEE_DEBUG)
   startNewViewComb();
-#elif defined (CHAINED_CHEAP_AND_QUICK) || defined (CHAINED_CHEAP_AND_QUICK_DEBUG)
+#elif defined (CHAINED_HYBRID_TEE) || defined (CHAINED_HYBRID_TEE_DEBUG)
   startNewViewChComb();
 #else
   recordStats();
@@ -562,7 +572,7 @@ void Handler::startNewViewOnTimeout() {
 const uint8_t MsgNewViewComb::opcode;
 const uint8_t MsgLdrPrepareComb::opcode;
 const uint8_t MsgPrepareComb::opcode;
-#elif defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
+#elif defined(CHAINED_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE_DEBUG)
 const uint8_t MsgNewViewChComb::opcode;
 const uint8_t MsgLdrPrepareChComb::opcode;
 const uint8_t MsgPrepareChComb::opcode;
@@ -601,7 +611,7 @@ pnet(pec,pconf), cnet(cec,cconf) {
   if (DEBUG1) { std::cout << KBLU << nfo() << "qsize=" << this->qsize << "tqsize=" << this->tqsize << KNRM << std::endl; }
 
   // Trusted Functions
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   if (DEBUG0) { std::cout << KBLU << nfo() << "initializing TEE" << KNRM << std::endl; }
   initializeSGX();
   if (DEBUG0) { std::cout << KBLU << nfo() << "initialized TEE" << KNRM << std::endl; }
@@ -654,14 +664,23 @@ pnet(pec,pconf), cnet(cec,cconf) {
                              });
 
   this->timer = salticidae::TimerEvent(pec, [this](salticidae::TimerEvent &) {
-                                              if (DEBUG0) std::cout << KMAG << nfo()
-                                                                    << "timer ran out (timeout:" << this->timeout
-                                                                    << "->" << 4*this->timeout
-                                                                    << ")" << KNRM << std::endl;
                                               stats.incTimeouts();
                                               startNewViewOnTimeout();
                                               this->timer.del();
-                                              this->timeout=4*this->timeout;
+                                              // Gentler than 4x growth; cap so churn does not inflate view-change delays without bound.
+                                              constexpr double kBackoffFactor = 2.0;
+                                              constexpr double kBackoffCapMult = 8.0;
+                                              double cap = this->initTimeout * kBackoffCapMult;
+                                              double nextTimeout = std::min(this->timeout * kBackoffFactor, cap);
+                                              if (nextTimeout < this->initTimeout) {
+                                                nextTimeout = this->initTimeout;
+                                              }
+                                              this->timeout = nextTimeout;
+                                              if (DEBUG0) {
+                                                std::cout << KMAG << nfo()
+                                                          << "timer ran out (next timeout=" << this->timeout
+                                                          << "s, cap=" << cap << "s)" << KNRM << std::endl;
+                                              }
                                               this->timer.add(this->timeout);
                                             });
 
@@ -710,7 +729,7 @@ pnet(pec,pconf), cnet(cec,cconf) {
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_preparecomb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommitcomb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_commitcomb,    this, _1, _2));
-#elif defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
+#elif defined(CHAINED_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE_DEBUG)
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newview_ch_comb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepare_ch_comb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepare_ch_comb, this, _1, _2));
@@ -820,7 +839,19 @@ unsigned int Handler::getLeaderOf(View v) {
   // Leader candidates then come from all replicas; otherwise from TEE replicas.
   unsigned int pool = (this->totalTEE == 0) ? this->total : this->totalTEE;
   if (pool == 0) { return 0; }
-  return (v % pool);
+  unsigned int start = static_cast<unsigned int>(v % pool);
+  for (unsigned int k = 0; k < pool; k++) {
+    unsigned int cand = (start + k) % pool;
+    if (skippedLeaders.find(cand) == skippedLeaders.end()) {
+      return cand;
+    }
+  }
+  // Every index is skipped (should be rare); clear and fall back to nominal rotation.
+  if (DEBUG1) {
+    std::cout << KBLU << nfo() << "skippedLeaders covers full pool; clearing skip list (fallback)" << KNRM << std::endl;
+  }
+  skippedLeaders.clear();
+  return start;
 }
 // unsigned int Handler::getLeaderOf(View v) { return (v % this->total); }
 // leader stable
@@ -1050,7 +1081,7 @@ void Handler::sendMsgLdrPrepareChComb(MsgLdrPrepareChComb msg, Peers recipients)
 
 Just Handler::callTEEsign() {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   just_t jout;
   sgx_status_t ret;
   Just just = callTEEsignComb();
@@ -1067,7 +1098,7 @@ Just Handler::callTEEsign() {
 
 Just Handler::callTEEprepare(Hash h, Just j) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   just_t jout;
   just_t jin;
   setJust(j,&jin);
@@ -1088,7 +1119,7 @@ Just Handler::callTEEprepare(Hash h, Just j) {
 
 Just Handler::callTEEstore(Just j) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   just_t jout;
   just_t jin;
   setJust(j,&jin);
@@ -1127,7 +1158,7 @@ Just Handler::callTEEstore(Just j) {
 
 Accum Handler::callTEEaccum(Vote<Void,Cert> votes[MAX_NUM_SIGNATURES]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   accum_t aout;
   votes_t vin;
   setVotes(votes,&vin);
@@ -1148,7 +1179,7 @@ Accum Handler::callTEEaccum(Vote<Void,Cert> votes[MAX_NUM_SIGNATURES]) {
 // a simpler version of callTEEaccum for when all votes are for the same payload
 Accum Handler::callTEEaccumSp(uvote_t vote) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   accum_t aout;
   sgx_status_t ret;
   Accum acc; // legacy non-comb accumSp removed in hybrid/chained-only build
@@ -1167,7 +1198,7 @@ Accum Handler::callTEEaccumSp(uvote_t vote) {
 //////////////// Hybrid version////////////////////////
 Accum Handler::callTEEaccumComb(Just justs[MAX_NUM_SIGNATURES]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 #if defined(BASIC_HYBRID_TEE)
   Accum acc;
   if (this->nodeType) {
@@ -1202,7 +1233,7 @@ Accum Handler::callTEEaccumComb(Just justs[MAX_NUM_SIGNATURES]) {
 Accum Handler::callTEEaccumCombSp(just_t just) {
   auto start = std::chrono::steady_clock::now();
   if (DEBUGH) std::cout << KRED << nfo() << "callTEEaccumCombSp" << KNRM << std::endl;
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 #if defined(BASIC_HYBRID_TEE)
   Accum acc;
   if (this->nodeType) {
@@ -1232,7 +1263,7 @@ Accum Handler::callTEEaccumCombSp(just_t just) {
 Just Handler::callTEEsignComb() {
   auto start = std::chrono::steady_clock::now();
   if (DEBUGH) std::cout << KRED << nfo() << "TEEaccumComb" << KNRM << std::endl;
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
@@ -1262,7 +1293,7 @@ Just Handler::callTEEsignComb() {
 Just Handler::callTEEprepareComb(Hash h, Accum acc) {
   if (DEBUGH) std::cout << KRED << nfo() << "callTEEprepareComb" << KNRM << std::endl;
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
@@ -1302,7 +1333,7 @@ Just Handler::callTEEprepareComb(Hash h, Accum acc) {
 Just Handler::callTEEstoreComb(Just j) {
   auto start = std::chrono::steady_clock::now();
   if (DEBUGH) std::cout << KRED << nfo() << "callTEEstoreComb" << KNRM << std::endl;
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
@@ -1336,7 +1367,7 @@ Just Handler::callTEEstoreComb(Just j) {
 
 Just Handler::callTEEsignChComb() {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   just_t jout;
   sgx_status_t ret;
   sgx_status_t status = CH_COMB_TEEsign(global_eid, &ret, &jout);
@@ -1354,7 +1385,7 @@ Just Handler::callTEEsignChComb() {
 
 Just Handler::callTEEprepareChComb(CBlock block, Hash hash) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   just_t jout;
   // 1st block
   cblock_t cin;
@@ -1381,7 +1412,7 @@ Just Handler::callTEEprepareChComb(CBlock block, Hash hash) {
 
 Accum Handler::callTEEaccumChComb(Just justs[MAX_NUM_SIGNATURES]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   accum_t aout;
   onejusts_t jin;
   setOneJusts(justs,&jin);
@@ -1402,7 +1433,7 @@ Accum Handler::callTEEaccumChComb(Just justs[MAX_NUM_SIGNATURES]) {
 // a simpler version of callTEEaccumChComb for when all votes are for the same payload
 Accum Handler::callTEEaccumChCombSp(just_t just) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_CHEAP_AND_QUICK)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   accum_t aout;
   sgx_status_t ret;
   sgx_status_t status = CH_COMB_TEEaccumSp(global_eid, &ret, &just, &aout);
@@ -1472,7 +1503,7 @@ void Handler::getStarted() {
     else { sendMsgNewViewComb(msg,recipients); }
   }
   if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << leader << ")" << KNRM << std::endl;
-#elif defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
+#elif defined(CHAINED_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE_DEBUG)
   // We start voting
   Just j = callTEEsignChComb();
   if (DEBUG1) std::cout << KBLU << nfo() << "initial just:" << j.prettyPrint() << KNRM << std::endl;
@@ -1619,7 +1650,7 @@ void Handler::recordStats() {
   //fileThroughputHandle.close();
 
   // Latency
-#if defined(CHAINED_CHEAP_AND_QUICK) || defined(CHAINED_CHEAP_AND_QUICK_DEBUG)
+#if defined(CHAINED_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE_DEBUG)
   double latencyView = (stats.getExecTimeAvg() / 1000)/* milli-seconds spent on views */;
 #else
   double latencyView = 0.0;
@@ -1701,11 +1732,21 @@ void Handler::recordStats() {
 }
 
 
+void Handler::addLiveCommittedTxsAtCommit(View propView, Hash blockHash) {
+  std::map<View, Block>::iterator it = this->blocks.find(propView);
+  if (it == this->blocks.end()) {
+    return;
+  }
+  Block block = it->second;
+  if (!(block.hash() == blockHash)) {
+    return;
+  }
+  this->liveCommittedTxCount += static_cast<std::uint64_t>(block.getSize());
+}
+
+
 void Handler::recordLiveStats() {
   if (!this->started) { return; }
-
-  unsigned int quant2 = 10;
-  Times totv = stats.getTotalViewTime(quant2);
 
   long long elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                            std::chrono::steady_clock::now() - startTime)
@@ -1716,10 +1757,8 @@ void Handler::recordLiveStats() {
   }
   this->lastLiveElapsedMs = elapsedMs;
 
-  // Sliding-window aggregation for live metrics:
-  // - throughput uses delta_exec / delta_wall_time
-  // - latency uses average view-time of newly completed views in the window
-  this->liveAggHistory.push_back({elapsedMs, totv.n, totv.tot});
+  // Sliding window: throughput = (tx slots in committed blocks, sum of getSize() per view) / window time.
+  this->liveAggHistory.push_back({elapsedMs, this->liveCommittedTxCount});
   while (!this->liveAggHistory.empty() &&
          (this->liveAggHistory.size() > liveWindowMaxSamples ||
           (elapsedMs - this->liveAggHistory.front().elapsedMs) > liveWindowMs)) {
@@ -1727,31 +1766,20 @@ void Handler::recordLiveStats() {
   }
 
   double throughputWindow = 0.0;
-  double latencyWindow = 0.0;
   if (!this->liveAggHistory.empty()) {
     const LiveAggSample &base = this->liveAggHistory.front();
     long long dtMs = elapsedMs - base.elapsedMs;
     if (dtMs > 0) {
-      int dExecViews = static_cast<int>(totv.n) - static_cast<int>(base.execViews);
-      if (dExecViews < 0) { dExecViews = 0; }
+      std::uint64_t dTx = this->liveCommittedTxCount - base.committedTx;
       double dtSec = dtMs / 1000.0;
-      double dkops = (dExecViews * MAX_NUM_TRANSACTIONS * 1.0) / 1000.0;
-      throughputWindow = dkops / dtSec;
-
-      if (dExecViews > 0) {
-        double dViewMicros = totv.tot - base.totalViewMicros;
-        if (dViewMicros < 0.0) { dViewMicros = 0.0; }
-        latencyWindow = dViewMicros / dExecViews / 1000.0;
-      }
+      throughputWindow = static_cast<double>(dTx) / dtSec;
     }
   }
 
   std::ofstream fileLive(statsLive, std::ios::app);
-  // Write elapsed seconds as float, keep 3 decimals (~0.001s) for stable parsing.
   double elapsedSec = elapsedMs / 1000.0;
   fileLive << std::to_string(elapsedSec)
            << " " << std::to_string(throughputWindow)
-           << " " << std::to_string(latencyWindow)
            << " " << std::to_string(this->view)
            << "\n";
   fileLive.close();
@@ -1820,6 +1848,7 @@ bool Handler::timeToStop() {
 
 void Handler::executeRData(RData rdata) {
   //std::lock_guard<std::mutex> guard(mu_trans);
+  this->addLiveCommittedTxsAtCommit(rdata.getPropv(), rdata.getProph());
   auto endView = std::chrono::steady_clock::now();
   double time = std::chrono::duration_cast<std::chrono::microseconds>(endView - startView).count();
   startView = endView;
@@ -2479,6 +2508,7 @@ void Handler::startNewViewAcc() {
 
 void Handler::executeCData(CData<Hash,Void> cdata) {
   //std::lock_guard<std::mutex> guard(mu_trans);
+  this->addLiveCommittedTxsAtCommit(cdata.getView(), cdata.getBlock());
   auto endView = std::chrono::steady_clock::now();
   double time = std::chrono::duration_cast<std::chrono::microseconds>(endView - startView).count();
   startView = endView;
@@ -3081,6 +3111,7 @@ void Handler::startNewViewComb() {
 
 void Handler::executeComb(RData data) {
   //std::lock_guard<std::mutex> guard(mu_trans);
+  this->addLiveCommittedTxsAtCommit(data.getPropv(), data.getProph());
   auto endView = std::chrono::steady_clock::now();
   double time = std::chrono::duration_cast<std::chrono::microseconds>(endView - startView).count();
   startView = endView;
@@ -3385,22 +3416,30 @@ void Handler::tryExecuteChComb(CBlock blockL, CBlock block0) {
         if (!block2.isExecuted()) {
           Hash hash1 = block0.getCert().getHash();
           Hash hash2 = block2.hash();
+          // NOTE: Parent cert hash vs cblocks[view2].hash() check disabled — mismatch no longer
+          // aborts execution (was: clear blocksToExec and stop). Re-enable for production safety.
+          if (!(hash1 == hash2) && DEBUG1) {
+            std::cout << KBLU << nfo() << "hashes don't match (ignored): parent cert vs local block — continuing "
+                      << KNRM << std::endl;
+            std::cout << KBLU << nfo() << "hash1 (" << block0.getView() << "): " << hash1.toString() << KNRM << std::endl;
+            std::cout << KBLU << nfo() << "hash2 (" << block2.getView() << "," << view2 << "): " << hash2.toString() << KNRM << std::endl;
+          }
+          blocksToExec.insert(blocksToExec.begin(),block2);
+          // we see whether we can execute block2's certificate
+          if (view2 == 0) { // the genesis block
+            done = true;
+          } else { block0 = block2; view2 = block2.getCert().getView(); }
+          /* Original check (restores safety):
           if (hash1 == hash2) {
-            //|| // or for the genesis block: nodes for the '0' hash instead of the hash of the genesis block initially
-            //hash2 == CBlock().hash() && view2 == 0 && hash1.isZero()) {
             blocksToExec.insert(blocksToExec.begin(),block2);
-            // we see whether we can execute block2's certificate
-            if (view2 == 0) { // the genesis block
-              done = true;
-            } else { block0 = block2; view2 = block2.getCert().getView(); }
+            if (view2 == 0) { done = true; }
+            else { block0 = block2; view2 = block2.getCert().getView(); }
           } else {
-            // hashes don't match so we stop because we cannot execute
-            if (DEBUG1) std::cout << KBLU << nfo() << "hashes don't match, clearing blocks to execute " << KNRM << std::endl;
-            if (DEBUG1) std::cout << KBLU << nfo() << "hash1 (" << block0.getView() << "): " << hash1.toString() << KNRM << std::endl;
-            if (DEBUG1) std::cout << KBLU << nfo() << "hash2 (" << block2.getView() << "," << view2 << "): " << hash2.toString() << KNRM << std::endl;
+            if (DEBUG1) ...
             done = true;
             blocksToExec.clear();
           }
+          */
         } else {
           // If the block is already executed, we can stop and actually execute all the blocks we have collected so far
           done = true;

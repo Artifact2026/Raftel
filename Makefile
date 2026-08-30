@@ -47,6 +47,8 @@ Salticidae_Lib_Paths = -L$(SALTICIDAE)/lib
 
 CFLAGS = `pkg-config --cflags libcrypto openssl libuv` # gio-2.0 openssl
 LDLIBS = `pkg-config --libs   libcrypto openssl libuv` #-lgmp # gio-2.0 openssl
+CFLAGS += $(shell pkg-config --cflags hiredis 2>/dev/null)
+LDLIBS += $(shell pkg-config --libs hiredis 2>/dev/null)
 
 
 ######## SGX SDK Settings ########

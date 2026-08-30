@@ -93,13 +93,13 @@ Just TrustedChComb::TEEprepare(Stats &stats, Nodes nodes, CBlock block, Hash has
 }
 
 
-Accum TrustedChComb::TEEaccum(Stats &stats, Nodes nodes, Just justs[MAX_NUM_SIGNATURES]) {
+Accum TrustedChComb::TEEaccum(Stats &stats, Nodes nodes, Just justs[MAX_NUM_TEE_SIGNATURES]) {
   View v = justs[0].getRData().getPropv();
   View highest = 0;
   Hash hash = Hash();
   std::set<PID> signers;
 
-  for (int i = 0; i < MAX_NUM_SIGNATURES && i < this->qsize; i++) {
+  for (int i = 0; i < MAX_NUM_TEE_SIGNATURES && i < this->qsize; i++) {
     Just  just  = justs[i];
     RData data  = just.getRData();
     Signs signs = just.getSigns();
@@ -141,7 +141,7 @@ Accum TrustedChComb::TEEaccumSp(Stats &stats, Nodes nodes, just_t just) {
   std::string data = proph.toString() + std::to_string(propv) + justh.toString() + std::to_string(justv) + std::to_string(phase);
 
   if (phase == PH1_NEWVIEW) {
-    for (int i = 0; i < MAX_NUM_SIGNATURES && i < this->qsize && i < signs.size; i++) {
+    for (int i = 0; i < MAX_NUM_TEE_SIGNATURES && i < this->qsize && i < signs.size; i++) {
       PID signer = signs.signs[i].signer;
       Signs sign = Sign(signs.signs[i].set,signer,signs.signs[i].sign);
       bool vd = Signs(sign).verify(stats,this->id,nodes,data);

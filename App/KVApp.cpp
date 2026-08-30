@@ -1,6 +1,5 @@
 #include "KVApp.h"
 
-#include <cstdio>
 #include <cstring>
 
 namespace {
@@ -30,15 +29,6 @@ static int getI32(const std::array<unsigned char, PAYLOAD_SIZE> &buf, size_t off
          (static_cast<int>(buf[off + 3]) << 24);
 }
 
-static std::string shellQuote(const std::string &s) {
-  std::string out = "'";
-  for (char c : s) {
-    if (c == '\'') { out += "'\\''"; }
-    else { out += c; }
-  }
-  out += "'";
-  return out;
-}
 }  // namespace
 
 bool KVAppCodec::encode(const AppRequest &req, std::array<unsigned char, PAYLOAD_SIZE> &out) {
@@ -84,58 +74,106 @@ bool KVAppCodec::decode(const Transaction &tx, AppRequest &out) {
 
 KVAppExecutor::KVAppExecutor(int rid, int port) : replica_id(rid), redis_port(port) {}
 
+KVAppExecutor::~KVAppExecutor() {
+#if KVAPP_HAS_HIREDIS
+  if (redis_ctx != nullptr) {
+    redisFree(redis_ctx);
+    redis_ctx = nullptr;
+  }
+#endif
+}
+
 std::string KVAppExecutor::dedupKey(int client_id, int req_id) const {
   return std::to_string(client_id) + ":" + std::to_string(req_id);
 }
 
-bool KVAppExecutor::runRedisCli(const std::string &cmd, std::string &output) {
-  std::string full = "redis-cli -p " + std::to_string(this->redis_port) + " --raw " + cmd + " 2>/dev/null";
-  FILE *pipe = popen(full.c_str(), "r");
-  if (pipe == nullptr) { return false; }
-  char buffer[1024];
-  output.clear();
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) { output += buffer; }
-  int rc = pclose(pipe);
-  if (rc != 0) {
-    if (!this->warned_missing_redis_cli) { this->warned_missing_redis_cli = true; }
+bool KVAppExecutor::ensureRedisConnected() {
+#if !KVAPP_HAS_HIREDIS
+  return false;
+#else
+  if (redis_ctx != nullptr && redis_ctx->err == 0) {
+    return true;
+  }
+  if (redis_ctx != nullptr) {
+    redisFree(redis_ctx);
+    redis_ctx = nullptr;
+  }
+  const struct timeval timeout = {1, 0};
+  redis_ctx = redisConnectWithTimeout("127.0.0.1", this->redis_port, timeout);
+  if (redis_ctx == nullptr || redis_ctx->err != 0) {
+    if (!this->warned_redis_unavailable) { this->warned_redis_unavailable = true; }
+    if (redis_ctx != nullptr) {
+      redisFree(redis_ctx);
+      redis_ctx = nullptr;
+    }
     return false;
   }
-  while (!output.empty() && (output.back() == '\n' || output.back() == '\r')) { output.pop_back(); }
   return true;
+#endif
 }
 
 AppReply KVAppExecutor::execRedis(const AppRequest &req) {
+#if !KVAPP_HAS_HIREDIS
+  return execFallback(req);
+#else
   AppReply rep;
-  std::string out;
+  if (!ensureRedisConnected()) {
+    return execFallback(req);
+  }
+
   if (req.op == OpType::OP_SET) {
-    if (!runRedisCli("SET " + shellQuote(req.key) + " " + shellQuote(req.value), out)) {
+    redisReply *reply = static_cast<redisReply *>(
+        redisCommand(redis_ctx, "SET %b %b", req.key.data(), req.key.size(), req.value.data(), req.value.size()));
+    if (reply == nullptr) {
+      if (redis_ctx != nullptr) { redisFree(redis_ctx); redis_ctx = nullptr; }
       return execFallback(req);
     }
-    rep.status = ReplyStatus::REPLY_OK;
+    rep.status = (reply->type == REDIS_REPLY_STATUS || reply->type == REDIS_REPLY_STRING)
+                     ? ReplyStatus::REPLY_OK
+                     : ReplyStatus::REPLY_ERROR;
+    freeReplyObject(reply);
     return rep;
   }
   if (req.op == OpType::OP_GET) {
-    if (!runRedisCli("GET " + shellQuote(req.key), out)) {
+    redisReply *reply = static_cast<redisReply *>(
+        redisCommand(redis_ctx, "GET %b", req.key.data(), req.key.size()));
+    if (reply == nullptr) {
+      if (redis_ctx != nullptr) { redisFree(redis_ctx); redis_ctx = nullptr; }
       return execFallback(req);
     }
-    if (out.empty()) {
+    if (reply->type == REDIS_REPLY_NIL) {
       rep.status = ReplyStatus::REPLY_NOT_FOUND;
-    } else {
+    } else if (reply->type == REDIS_REPLY_STRING || reply->type == REDIS_REPLY_STATUS) {
       rep.status = ReplyStatus::REPLY_OK;
-      rep.value = out;
+      if (reply->str != nullptr && reply->len > 0) {
+        rep.value.assign(reply->str, static_cast<size_t>(reply->len));
+      }
+    } else {
+      rep.status = ReplyStatus::REPLY_ERROR;
     }
+    freeReplyObject(reply);
     return rep;
   }
   if (req.op == OpType::OP_DEL) {
-    if (!runRedisCli("DEL " + shellQuote(req.key), out)) {
+    redisReply *reply = static_cast<redisReply *>(
+        redisCommand(redis_ctx, "DEL %b", req.key.data(), req.key.size()));
+    if (reply == nullptr) {
+      if (redis_ctx != nullptr) { redisFree(redis_ctx); redis_ctx = nullptr; }
       return execFallback(req);
     }
-    rep.status = ReplyStatus::REPLY_OK;
-    rep.del_count = (out == "1") ? 1 : 0;
+    if (reply->type == REDIS_REPLY_INTEGER) {
+      rep.status = ReplyStatus::REPLY_OK;
+      rep.del_count = static_cast<int>(reply->integer);
+    } else {
+      rep.status = ReplyStatus::REPLY_ERROR;
+      rep.del_count = 0;
+    }
+    freeReplyObject(reply);
     return rep;
   }
   rep.status = ReplyStatus::REPLY_ERROR;
   return rep;
+#endif
 }
 
 AppReply KVAppExecutor::execFallback(const AppRequest &req) {

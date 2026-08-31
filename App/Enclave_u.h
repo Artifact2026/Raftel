@@ -113,6 +113,11 @@ sgx_status_t CH_COMB_TEEsign(sgx_enclave_id_t eid, sgx_status_t* retval, just_t*
 sgx_status_t CH_COMB_TEEprepare(sgx_enclave_id_t eid, sgx_status_t* retval, cblock_t* block, hash_t* hash, just_t* res);
 sgx_status_t CH_COMB_TEEaccum(sgx_enclave_id_t eid, sgx_status_t* retval, onejusts_t* js, accum_t* res);
 sgx_status_t CH_COMB_TEEaccumSp(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, accum_t* res);
+sgx_status_t ACHILLES_CH_TEEsign(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just);
+sgx_status_t ACHILLES_CH_TEEverify(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, unsigned int* res);
+sgx_status_t ACHILLES_CH_TEEprepare(sgx_enclave_id_t eid, sgx_status_t* retval, cblock_t* block, hash_t* hash, just_t* res);
+sgx_status_t ACHILLES_CH_TEEaccum(sgx_enclave_id_t eid, sgx_status_t* retval, onejusts_t* js, accum_t* res);
+sgx_status_t ACHILLES_CH_TEEaccumSp(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, accum_t* res);
 
 #ifdef __cplusplus
 }

@@ -257,6 +257,36 @@ typedef struct ms_CH_COMB_TEEaccumSp_t {
 	accum_t* ms_res;
 } ms_CH_COMB_TEEaccumSp_t;
 
+typedef struct ms_ACHILLES_CH_TEEsign_t {
+	sgx_status_t ms_retval;
+	just_t* ms_just;
+} ms_ACHILLES_CH_TEEsign_t;
+
+typedef struct ms_ACHILLES_CH_TEEverify_t {
+	sgx_status_t ms_retval;
+	just_t* ms_just;
+	unsigned int* ms_res;
+} ms_ACHILLES_CH_TEEverify_t;
+
+typedef struct ms_ACHILLES_CH_TEEprepare_t {
+	sgx_status_t ms_retval;
+	cblock_t* ms_block;
+	hash_t* ms_hash;
+	just_t* ms_res;
+} ms_ACHILLES_CH_TEEprepare_t;
+
+typedef struct ms_ACHILLES_CH_TEEaccum_t {
+	sgx_status_t ms_retval;
+	onejusts_t* ms_js;
+	accum_t* ms_res;
+} ms_ACHILLES_CH_TEEaccum_t;
+
+typedef struct ms_ACHILLES_CH_TEEaccumSp_t {
+	sgx_status_t ms_retval;
+	just_t* ms_just;
+	accum_t* ms_res;
+} ms_ACHILLES_CH_TEEaccumSp_t;
+
 typedef struct ms_ocall_print_t {
 	const char* ms_str;
 } ms_ocall_print_t;
@@ -3031,11 +3061,356 @@ err:
 	return status;
 }
 
+static sgx_status_t SGX_CDECL sgx_ACHILLES_CH_TEEsign(void* pms)
+{
+	CHECK_REF_POINTER(pms, sizeof(ms_ACHILLES_CH_TEEsign_t));
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+	ms_ACHILLES_CH_TEEsign_t* ms = SGX_CAST(ms_ACHILLES_CH_TEEsign_t*, pms);
+	ms_ACHILLES_CH_TEEsign_t __in_ms;
+	if (memcpy_s(&__in_ms, sizeof(ms_ACHILLES_CH_TEEsign_t), ms, sizeof(ms_ACHILLES_CH_TEEsign_t))) {
+		return SGX_ERROR_UNEXPECTED;
+	}
+	sgx_status_t status = SGX_SUCCESS;
+	just_t* _tmp_just = __in_ms.ms_just;
+	size_t _len_just = sizeof(just_t);
+	just_t* _in_just = NULL;
+	sgx_status_t _in_retval;
+
+	CHECK_UNIQUE_POINTER(_tmp_just, _len_just);
+
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+
+	if (_tmp_just != NULL && _len_just != 0) {
+		if ((_in_just = (just_t*)malloc(_len_just)) == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		memset((void*)_in_just, 0, _len_just);
+	}
+	_in_retval = ACHILLES_CH_TEEsign(_in_just);
+	if (memcpy_verw_s(&ms->ms_retval, sizeof(ms->ms_retval), &_in_retval, sizeof(_in_retval))) {
+		status = SGX_ERROR_UNEXPECTED;
+		goto err;
+	}
+	if (_in_just) {
+		if (memcpy_verw_s(_tmp_just, _len_just, _in_just, _len_just)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+	}
+
+err:
+	if (_in_just) free(_in_just);
+	return status;
+}
+
+static sgx_status_t SGX_CDECL sgx_ACHILLES_CH_TEEverify(void* pms)
+{
+	CHECK_REF_POINTER(pms, sizeof(ms_ACHILLES_CH_TEEverify_t));
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+	ms_ACHILLES_CH_TEEverify_t* ms = SGX_CAST(ms_ACHILLES_CH_TEEverify_t*, pms);
+	ms_ACHILLES_CH_TEEverify_t __in_ms;
+	if (memcpy_s(&__in_ms, sizeof(ms_ACHILLES_CH_TEEverify_t), ms, sizeof(ms_ACHILLES_CH_TEEverify_t))) {
+		return SGX_ERROR_UNEXPECTED;
+	}
+	sgx_status_t status = SGX_SUCCESS;
+	just_t* _tmp_just = __in_ms.ms_just;
+	size_t _len_just = sizeof(just_t);
+	just_t* _in_just = NULL;
+	unsigned int* _tmp_res = __in_ms.ms_res;
+	size_t _len_res = sizeof(unsigned int);
+	unsigned int* _in_res = NULL;
+	sgx_status_t _in_retval;
+
+	CHECK_UNIQUE_POINTER(_tmp_just, _len_just);
+	CHECK_UNIQUE_POINTER(_tmp_res, _len_res);
+
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+
+	if (_tmp_just != NULL && _len_just != 0) {
+		_in_just = (just_t*)malloc(_len_just);
+		if (_in_just == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		if (memcpy_s(_in_just, _len_just, _tmp_just, _len_just)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+
+	}
+	if (_tmp_res != NULL && _len_res != 0) {
+		if ( _len_res % sizeof(*_tmp_res) != 0)
+		{
+			status = SGX_ERROR_INVALID_PARAMETER;
+			goto err;
+		}
+		if ((_in_res = (unsigned int*)malloc(_len_res)) == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		memset((void*)_in_res, 0, _len_res);
+	}
+	_in_retval = ACHILLES_CH_TEEverify(_in_just, _in_res);
+	if (memcpy_verw_s(&ms->ms_retval, sizeof(ms->ms_retval), &_in_retval, sizeof(_in_retval))) {
+		status = SGX_ERROR_UNEXPECTED;
+		goto err;
+	}
+	if (_in_res) {
+		if (memcpy_verw_s(_tmp_res, _len_res, _in_res, _len_res)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+	}
+
+err:
+	if (_in_just) free(_in_just);
+	if (_in_res) free(_in_res);
+	return status;
+}
+
+static sgx_status_t SGX_CDECL sgx_ACHILLES_CH_TEEprepare(void* pms)
+{
+	CHECK_REF_POINTER(pms, sizeof(ms_ACHILLES_CH_TEEprepare_t));
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+	ms_ACHILLES_CH_TEEprepare_t* ms = SGX_CAST(ms_ACHILLES_CH_TEEprepare_t*, pms);
+	ms_ACHILLES_CH_TEEprepare_t __in_ms;
+	if (memcpy_s(&__in_ms, sizeof(ms_ACHILLES_CH_TEEprepare_t), ms, sizeof(ms_ACHILLES_CH_TEEprepare_t))) {
+		return SGX_ERROR_UNEXPECTED;
+	}
+	sgx_status_t status = SGX_SUCCESS;
+	cblock_t* _tmp_block = __in_ms.ms_block;
+	size_t _len_block = sizeof(cblock_t);
+	cblock_t* _in_block = NULL;
+	hash_t* _tmp_hash = __in_ms.ms_hash;
+	size_t _len_hash = sizeof(hash_t);
+	hash_t* _in_hash = NULL;
+	just_t* _tmp_res = __in_ms.ms_res;
+	size_t _len_res = sizeof(just_t);
+	just_t* _in_res = NULL;
+	sgx_status_t _in_retval;
+
+	CHECK_UNIQUE_POINTER(_tmp_block, _len_block);
+	CHECK_UNIQUE_POINTER(_tmp_hash, _len_hash);
+	CHECK_UNIQUE_POINTER(_tmp_res, _len_res);
+
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+
+	if (_tmp_block != NULL && _len_block != 0) {
+		_in_block = (cblock_t*)malloc(_len_block);
+		if (_in_block == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		if (memcpy_s(_in_block, _len_block, _tmp_block, _len_block)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+
+	}
+	if (_tmp_hash != NULL && _len_hash != 0) {
+		_in_hash = (hash_t*)malloc(_len_hash);
+		if (_in_hash == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		if (memcpy_s(_in_hash, _len_hash, _tmp_hash, _len_hash)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+
+	}
+	if (_tmp_res != NULL && _len_res != 0) {
+		if ((_in_res = (just_t*)malloc(_len_res)) == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		memset((void*)_in_res, 0, _len_res);
+	}
+	_in_retval = ACHILLES_CH_TEEprepare(_in_block, _in_hash, _in_res);
+	if (memcpy_verw_s(&ms->ms_retval, sizeof(ms->ms_retval), &_in_retval, sizeof(_in_retval))) {
+		status = SGX_ERROR_UNEXPECTED;
+		goto err;
+	}
+	if (_in_res) {
+		if (memcpy_verw_s(_tmp_res, _len_res, _in_res, _len_res)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+	}
+
+err:
+	if (_in_block) free(_in_block);
+	if (_in_hash) free(_in_hash);
+	if (_in_res) free(_in_res);
+	return status;
+}
+
+static sgx_status_t SGX_CDECL sgx_ACHILLES_CH_TEEaccum(void* pms)
+{
+	CHECK_REF_POINTER(pms, sizeof(ms_ACHILLES_CH_TEEaccum_t));
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+	ms_ACHILLES_CH_TEEaccum_t* ms = SGX_CAST(ms_ACHILLES_CH_TEEaccum_t*, pms);
+	ms_ACHILLES_CH_TEEaccum_t __in_ms;
+	if (memcpy_s(&__in_ms, sizeof(ms_ACHILLES_CH_TEEaccum_t), ms, sizeof(ms_ACHILLES_CH_TEEaccum_t))) {
+		return SGX_ERROR_UNEXPECTED;
+	}
+	sgx_status_t status = SGX_SUCCESS;
+	onejusts_t* _tmp_js = __in_ms.ms_js;
+	size_t _len_js = sizeof(onejusts_t);
+	onejusts_t* _in_js = NULL;
+	accum_t* _tmp_res = __in_ms.ms_res;
+	size_t _len_res = sizeof(accum_t);
+	accum_t* _in_res = NULL;
+	sgx_status_t _in_retval;
+
+	CHECK_UNIQUE_POINTER(_tmp_js, _len_js);
+	CHECK_UNIQUE_POINTER(_tmp_res, _len_res);
+
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+
+	if (_tmp_js != NULL && _len_js != 0) {
+		_in_js = (onejusts_t*)malloc(_len_js);
+		if (_in_js == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		if (memcpy_s(_in_js, _len_js, _tmp_js, _len_js)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+
+	}
+	if (_tmp_res != NULL && _len_res != 0) {
+		if ((_in_res = (accum_t*)malloc(_len_res)) == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		memset((void*)_in_res, 0, _len_res);
+	}
+	_in_retval = ACHILLES_CH_TEEaccum(_in_js, _in_res);
+	if (memcpy_verw_s(&ms->ms_retval, sizeof(ms->ms_retval), &_in_retval, sizeof(_in_retval))) {
+		status = SGX_ERROR_UNEXPECTED;
+		goto err;
+	}
+	if (_in_res) {
+		if (memcpy_verw_s(_tmp_res, _len_res, _in_res, _len_res)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+	}
+
+err:
+	if (_in_js) free(_in_js);
+	if (_in_res) free(_in_res);
+	return status;
+}
+
+static sgx_status_t SGX_CDECL sgx_ACHILLES_CH_TEEaccumSp(void* pms)
+{
+	CHECK_REF_POINTER(pms, sizeof(ms_ACHILLES_CH_TEEaccumSp_t));
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+	ms_ACHILLES_CH_TEEaccumSp_t* ms = SGX_CAST(ms_ACHILLES_CH_TEEaccumSp_t*, pms);
+	ms_ACHILLES_CH_TEEaccumSp_t __in_ms;
+	if (memcpy_s(&__in_ms, sizeof(ms_ACHILLES_CH_TEEaccumSp_t), ms, sizeof(ms_ACHILLES_CH_TEEaccumSp_t))) {
+		return SGX_ERROR_UNEXPECTED;
+	}
+	sgx_status_t status = SGX_SUCCESS;
+	just_t* _tmp_just = __in_ms.ms_just;
+	size_t _len_just = sizeof(just_t);
+	just_t* _in_just = NULL;
+	accum_t* _tmp_res = __in_ms.ms_res;
+	size_t _len_res = sizeof(accum_t);
+	accum_t* _in_res = NULL;
+	sgx_status_t _in_retval;
+
+	CHECK_UNIQUE_POINTER(_tmp_just, _len_just);
+	CHECK_UNIQUE_POINTER(_tmp_res, _len_res);
+
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+
+	if (_tmp_just != NULL && _len_just != 0) {
+		_in_just = (just_t*)malloc(_len_just);
+		if (_in_just == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		if (memcpy_s(_in_just, _len_just, _tmp_just, _len_just)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+
+	}
+	if (_tmp_res != NULL && _len_res != 0) {
+		if ((_in_res = (accum_t*)malloc(_len_res)) == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		memset((void*)_in_res, 0, _len_res);
+	}
+	_in_retval = ACHILLES_CH_TEEaccumSp(_in_just, _in_res);
+	if (memcpy_verw_s(&ms->ms_retval, sizeof(ms->ms_retval), &_in_retval, sizeof(_in_retval))) {
+		status = SGX_ERROR_UNEXPECTED;
+		goto err;
+	}
+	if (_in_res) {
+		if (memcpy_verw_s(_tmp_res, _len_res, _in_res, _len_res)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+	}
+
+err:
+	if (_in_just) free(_in_just);
+	if (_in_res) free(_in_res);
+	return status;
+}
+
 SGX_EXTERNC const struct {
 	size_t nr_ecall;
-	struct {void* ecall_addr; uint8_t is_priv; uint8_t is_switchless;} ecall_table[36];
+	struct {void* ecall_addr; uint8_t is_priv; uint8_t is_switchless;} ecall_table[41];
 } g_ecall_table = {
-	36,
+	41,
 	{
 		{(void*)(uintptr_t)sgx_initialize_variables, 0, 0},
 		{(void*)(uintptr_t)sgx_TEEsign, 0, 0},
@@ -3073,29 +3448,34 @@ SGX_EXTERNC const struct {
 		{(void*)(uintptr_t)sgx_CH_COMB_TEEprepare, 0, 0},
 		{(void*)(uintptr_t)sgx_CH_COMB_TEEaccum, 0, 0},
 		{(void*)(uintptr_t)sgx_CH_COMB_TEEaccumSp, 0, 0},
+		{(void*)(uintptr_t)sgx_ACHILLES_CH_TEEsign, 0, 0},
+		{(void*)(uintptr_t)sgx_ACHILLES_CH_TEEverify, 0, 0},
+		{(void*)(uintptr_t)sgx_ACHILLES_CH_TEEprepare, 0, 0},
+		{(void*)(uintptr_t)sgx_ACHILLES_CH_TEEaccum, 0, 0},
+		{(void*)(uintptr_t)sgx_ACHILLES_CH_TEEaccumSp, 0, 0},
 	}
 };
 
 SGX_EXTERNC const struct {
 	size_t nr_ocall;
-	uint8_t entry_table[14][36];
+	uint8_t entry_table[14][41];
 } g_dyn_entry_table = {
 	14,
 	{
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
 	}
 };
 

@@ -1164,5 +1164,31 @@ struct MsgPrepareChComb {
   //void serialize(salticidae::DataStream &s) const { s << data << sign; }
 };
 
+// Achilles uses the chained Checker+Accumulator wire layout, but separate
+// opcodes prevent it from being mixed with CHAINED_HYBRID_TEE traffic.
+struct MsgNewViewAchillesCh {
+  static const uint8_t opcode = HDR_NEWVIEW_ACHILLES_CH;
+  salticidae::DataStream serialized;
+  RData data; Sign sign;
+  MsgNewViewAchillesCh(const RData &d,const Sign &s):data(d),sign(s){serialized<<data<<sign;}
+  MsgNewViewAchillesCh(salticidae::DataStream &&s){s>>data>>sign;}
+};
+
+struct MsgLdrPrepareAchillesCh {
+  static const uint8_t opcode = HDR_PREPARE_LDR_ACHILLES_CH;
+  salticidae::DataStream serialized;
+  CBlock block; Sign sign;
+  MsgLdrPrepareAchillesCh(const CBlock &b,const Sign &s):block(b),sign(s){serialized<<block<<sign;}
+  MsgLdrPrepareAchillesCh(salticidae::DataStream &&s){s>>block>>sign;}
+};
+
+struct MsgPrepareAchillesCh {
+  static const uint8_t opcode = HDR_PREPARE_ACHILLES_CH;
+  salticidae::DataStream serialized;
+  RData data; Sign sign;
+  MsgPrepareAchillesCh(const RData &d,const Sign &s):data(d),sign(s){serialized<<data<<sign;}
+  MsgPrepareAchillesCh(salticidae::DataStream &&s){s>>data>>sign;}
+};
+
 
 #endif

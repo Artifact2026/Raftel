@@ -24,11 +24,7 @@ from typing import Optional
 _PROTOCOL_CHECKOUT = {
     "HybridTEE": (3, "main"),
     "Chained-HybridTEE": (2, "main"),
-    "Achilles": (2, "Achilles"),
-    "Achilles-Recovery": (2, "Achilles"),
-    "FlexiBFT": (3, "FlexiBFT"),
-    "Damysus": (2, "Damysus"),
-    "Oneshot": (2, "oneshot"),
+    "Achilles": (2, "main"),
     "Hotstuff": (3, "main"),
     "Basic-Damysus": (2, "main"),
 }
@@ -57,12 +53,9 @@ def tee_quorum_size(totaltee: int, faults: int) -> int:
 
 # --- run.py CLI flags vs experiments.py (for comparable experiments) ---
 # experiments.py uses --p1..--p8; run.py uses different numbering. Rough mapping:
-#   run --p0 HybridTEE          ~ experiments --p4 (COMB / BASIC_HYBRID_TEE)
+#   run --p0 HybridTEE          -> BASIC_HYBRID_TEE
 #   run --p01 Chained-Hybrid   ~ (no direct single flag; see experiments CH*)
 #   run --p1 Achilles          ~ experiments Achilles branch
-#   run --p2 FlexiBFT          ~ experiments multi-branch
-#   run --p3 Damysus           ~ experiments --p6 chained COMB (CHAINED_HYBRID_TEE)
-#   run --p4 Oneshot           ~ experiments --p8 (ONEP / BASIC_ONEP)
 #   run --p5 Hotstuff          ~ experiments --p1 (BASE / BASIC_HOTSTUFF)
 #   run --p6 Basic-Damysus     ~ upstream BASIC_CHEAP_AND_QUICK / BASIC_DAMYSUS
 # Local defaults aligned with experiments.py: numViews=10, numClTrans=1, config isTEE:1 for all nodes.
@@ -1433,13 +1426,7 @@ def mkParams(protocol,debug,constFactor,numFaults,totaltee,numTrans,payloadSize,
     elif protocol == "Chained-HybridTEE":
         f.write("#define CHAINED_HYBRID_TEE\n")
     elif protocol == "Achilles":
-        f.write("#define ACHILLES\n")
-    elif protocol == "FlexiBFT":
-        f.write("#define CHAINED_HYBRID_TEE\n")
-    elif protocol == "Damysus":
-        f.write("#define CHAINED_HYBRID_TEE\n")
-    elif protocol == "Oneshot":
-        f.write("#define BASIC_ONEP\n")
+        f.write("#define CHAINED_ACHILLES\n")
     elif protocol == "Hotstuff":
         f.write("#define BASIC_HOTSTUFF\n")
     elif protocol == "Basic-Damysus":
@@ -2569,9 +2556,6 @@ def main():
     parser.add_argument("--p0",        action="store_true",    help="run HybridTEE")
     parser.add_argument("--p01",       action="store_true",    help="run Chianed-HybridTEE")
     parser.add_argument("--p1",        action="store_true",    help="run Achilles")
-    parser.add_argument("--p2",        action="store_true",    help="run FlexiBFT")
-    parser.add_argument("--p3",        action="store_true",    help="run Damysus")
-    parser.add_argument("--p4",        action="store_true",    help="run Oneshot")
     parser.add_argument("--p5",        action="store_true",    help="run hotstuff")
     parser.add_argument("--p6",        action="store_true",    help="run basic Damysus")
     parser.add_argument("--debug",     action="store_true",    help="non_TEE")
@@ -2657,12 +2641,6 @@ def main():
         Protocol = "Chained-HybridTEE"
     elif args.p1:
         Protocol = "Achilles"
-    elif args.p2:
-        Protocol = "FlexiBFT"
-    elif args.p3:
-        Protocol = "Damysus"
-    elif args.p4:
-        Protocol = "Oneshot"
     elif args.p5:
         Protocol = "Hotstuff"
     elif args.p6:

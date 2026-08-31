@@ -65,6 +65,13 @@ enclave {
         public sgx_status_t CH_COMB_TEEprepare([in] cblock_t *block, [in] hash_t *hash, [out] just_t *res);
         public sgx_status_t CH_COMB_TEEaccum([in] onejusts_t *js, [out] accum_t *res);
         public sgx_status_t CH_COMB_TEEaccumSp([in] just_t *just, [out] accum_t *res);
+
+        /* Chained Achilles, isolated from CHAINED_HYBRID_TEE state. */
+        public sgx_status_t ACHILLES_CH_TEEsign([out] just_t *just);
+        public sgx_status_t ACHILLES_CH_TEEverify([in] just_t *just, [out] unsigned int *res);
+        public sgx_status_t ACHILLES_CH_TEEprepare([in] cblock_t *block, [in] hash_t *hash, [out] just_t *res);
+        public sgx_status_t ACHILLES_CH_TEEaccum([in] onejusts_t *js, [out] accum_t *res);
+        public sgx_status_t ACHILLES_CH_TEEaccumSp([in] just_t *just, [out] accum_t *res);
     };
 
     untrusted {

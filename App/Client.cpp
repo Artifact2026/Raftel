@@ -28,24 +28,6 @@ using MsgNet    = salticidae::MsgNetwork<uint8_t>;
 using Clock     = std::chrono::time_point<std::chrono::steady_clock>;
 using TransInfo = std::tuple<unsigned int,Clock,Transaction>; // int: number of replies
 
-#ifdef COMB
-const uint8_t MsgNewViewComb::opcode;
-const uint8_t MsgLdrPrepareComb::opcode;
-const uint8_t MsgPrepareComb::opcode;
-const uint8_t MsgPreCommitComb::opcode;
-#elif defined(ACCUM)
-const uint8_t MsgNewViewAcc::opcode;
-const uint8_t MsgLdrPrepareAcc::opcode;
-const uint8_t MsgPrepareAcc::opcode;
-const uint8_t MsgPreCommitAcc::opcode;
-#else
-const uint8_t MsgNewView::opcode;
-const uint8_t MsgPrepare::opcode;
-const uint8_t MsgLdrPrepare::opcode;
-const uint8_t MsgPreCommit::opcode;
-const uint8_t MsgCommit::opcode;
-#endif
-
 const uint8_t MsgTransaction::opcode;
 const uint8_t MsgReply::opcode;
 const uint8_t MsgStart::opcode;
@@ -450,7 +432,7 @@ int main(int argc, char const *argv[]) {
 #if defined(KK_RSA4096) || defined(KK_RSA2048)
     pub = RSA_new();
 #endif
-#if (defined(ACCUM) || defined(COMB)) && defined(KK_EC256)
+#if defined(KK_EC256)
     BIO *bio = BIO_new(BIO_s_mem());
     int w = BIO_write(bio,pub_key256,sizeof(pub_key256));
     pub = PEM_read_bio_EC_PUBKEY(bio, NULL, NULL, NULL);
@@ -488,6 +470,11 @@ int main(int argc, char const *argv[]) {
                    sizeof(MsgPrepareDamysus),
                    sizeof(MsgPreCommitDamysus),
                    sizeof(MsgCommitDamysus)});
+  #elif defined(CHAINED_ACHILLES)
+  size = std::max({size,
+                   sizeof(MsgNewViewAchillesCh),
+                   sizeof(MsgLdrPrepareAchillesCh),
+                   sizeof(MsgPrepareAchillesCh)});
   #else
   #error "Unsupported protocol macro for Client.cpp"
   #endif

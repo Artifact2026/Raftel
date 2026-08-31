@@ -58,7 +58,7 @@ std::uniform_int_distribution<int>  distr(0, 1);
 std::string Handler::nfo() { return "[" + std::to_string(this->myid) + "]{" +  std::to_string(this->view) + "}"; }
 
 
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
 // These versions use trusted components
 #if defined(BASIC_HYBRID_TEE)
 // Hybrid mode also needs a non-enclave trusted path for non-TEE replicas.
@@ -491,7 +491,7 @@ void setCBlock(CBlock block, cblock_t *b) {
 
 // ------------------------------------
 // SGX related stuff
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
 /* Global EID shared by multiple threads */
 sgx_enclave_id_t global_eid = 0;
 
@@ -598,6 +598,8 @@ void Handler::startNewViewOnTimeout() {
   startNewView();
 #elif defined(BASIC_DAMYSUS)
   startNewViewComb();
+#elif defined(CHAINED_ACHILLES)
+  startNewViewChComb();
 #else
   recordStats();
 #endif
@@ -625,6 +627,10 @@ const uint8_t MsgLdrPrepareDamysus::opcode;
 const uint8_t MsgPrepareDamysus::opcode;
 const uint8_t MsgPreCommitDamysus::opcode;
 const uint8_t MsgCommitDamysus::opcode;
+#elif defined(CHAINED_ACHILLES)
+const uint8_t MsgNewViewAchillesCh::opcode;
+const uint8_t MsgLdrPrepareAchillesCh::opcode;
+const uint8_t MsgPrepareAchillesCh::opcode;
 #else
 #error "Unsupported protocol macro for Handler opcodes"
 #endif
@@ -668,7 +674,7 @@ pnet(pec,pconf), cnet(cec,cconf) {
   if (DEBUG1) { std::cout << KBLU << nfo() << "qsize=" << this->qsize << "tqsize=" << this->tqsize << KNRM << std::endl; }
 
   // Trusted Functions
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
   if (DEBUG0) { std::cout << KBLU << nfo() << "initializing TEE" << KNRM << std::endl; }
   if (initializeSGX() != 0) {
     throw std::runtime_error("HybridTEE enclave initialization failed");
@@ -804,6 +810,10 @@ pnet(pec,pconf), cnet(cec,cconf) {
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepare_damysus,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommit_damysus,  this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_commit_damysus,     this, _1, _2));
+#elif defined(CHAINED_ACHILLES)
+  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newview_achilles_ch,    this, _1, _2));
+  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepare_achilles_ch, this, _1, _2));
+  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepare_achilles_ch,    this, _1, _2));
 #else
   #error "Unsupported protocol macro for Handler pnet handlers"
 #endif
@@ -1144,18 +1154,30 @@ void Handler::sendMsgLdrPrepareCh(MsgLdrPrepareCh msg, Peers recipients) {
 
 void Handler::sendMsgNewViewChComb(MsgNewViewChComb msg, Peers recipients) {
   if (DEBUG1) std::cout << KBLU << nfo() << "sending:" << msg.prettyPrint() << "->" << recipients2string(recipients) << KNRM << std::endl;
+#if defined(CHAINED_ACHILLES)
+  this->pnet.multicast_msg(MsgNewViewAchillesCh(msg.data,msg.sign), getPeerids(recipients));
+#else
   this->pnet.multicast_msg(msg, getPeerids(recipients));
+#endif
 }
 
 void Handler::sendMsgPrepareChComb(MsgPrepareChComb msg, Peers recipients) {
   if (DEBUG1) std::cout << KBLU << nfo() << "sending:" << msg.prettyPrint() << "->" << recipients2string(recipients) << KNRM << std::endl;
+#if defined(CHAINED_ACHILLES)
+  this->pnet.multicast_msg(MsgPrepareAchillesCh(msg.data,msg.sign), getPeerids(recipients));
+#else
   this->pnet.multicast_msg(msg, getPeerids(recipients));
+#endif
   if (DEBUGT) printNowTime("sending MsgPrepareChComb");
 }
 
 void Handler::sendMsgLdrPrepareChComb(MsgLdrPrepareChComb msg, Peers recipients) {
   if (DEBUG1) std::cout << KBLU << nfo() << "sending(" << sizeof(msg) << "-" << sizeof(MsgLdrPrepareChComb) << "):" << msg.prettyPrint() << "->" << recipients2string(recipients) << KNRM << std::endl;
+#if defined(CHAINED_ACHILLES)
+  this->pnet.multicast_msg(MsgLdrPrepareAchillesCh(msg.block,msg.sign), getPeerids(recipients));
+#else
   this->pnet.multicast_msg(msg, getPeerids(recipients));
+#endif
   if (DEBUGT) printNowTime("sending MsgLdrPrepareChComb");
 }
 
@@ -1163,7 +1185,7 @@ void Handler::sendMsgLdrPrepareChComb(MsgLdrPrepareChComb msg, Peers recipients)
 
 Just Handler::callTEEsign() {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
   just_t jout;
   sgx_status_t ret;
   Just just = callTEEsignComb();
@@ -1180,7 +1202,7 @@ Just Handler::callTEEsign() {
 
 Just Handler::callTEEprepare(Hash h, Just j) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
   just_t jout;
   just_t jin;
   setJust(j,&jin);
@@ -1201,7 +1223,7 @@ Just Handler::callTEEprepare(Hash h, Just j) {
 
 Just Handler::callTEEstore(Just j) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
   just_t jout;
   just_t jin;
   setJust(j,&jin);
@@ -1240,7 +1262,7 @@ Just Handler::callTEEstore(Just j) {
 
 Accum Handler::callTEEaccum(Vote<Void,Cert> votes[MAX_NUM_SIGNATURES]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
   accum_t aout;
   votes_t vin;
   setVotes(votes,&vin);
@@ -1261,7 +1283,7 @@ Accum Handler::callTEEaccum(Vote<Void,Cert> votes[MAX_NUM_SIGNATURES]) {
 // a simpler version of callTEEaccum for when all votes are for the same payload
 Accum Handler::callTEEaccumSp(uvote_t vote) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
   accum_t aout;
   sgx_status_t ret;
   Accum acc; // legacy non-comb accumSp removed in hybrid/chained-only build
@@ -1287,7 +1309,7 @@ Accum Handler::callTEEaccumComb(Just justs[MAX_NUM_SIGNATURES]) {
   sgx_status_t status=DAMYSUS_TEEaccum(global_eid,&ret,&jin,&aout);
   Accum acc;
   if (status==SGX_SUCCESS && ret==SGX_SUCCESS) acc=getAccum(&aout);
-#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(CHAINED_ACHILLES)
 #if defined(BASIC_HYBRID_TEE)
   Accum acc;
   if (this->nodeType) {
@@ -1329,7 +1351,7 @@ Accum Handler::callTEEaccumCombSp(just_t just) {
   sgx_status_t status=DAMYSUS_TEEaccumSp(global_eid,&ret,&just,&aout);
   Accum acc;
   if (status==SGX_SUCCESS && ret==SGX_SUCCESS) acc=getAccum(&aout);
-#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(CHAINED_ACHILLES)
 #if defined(BASIC_HYBRID_TEE)
   Accum acc;
   if (this->nodeType) {
@@ -1366,7 +1388,7 @@ Just Handler::callTEEsignComb() {
   sgx_status_t status=DAMYSUS_TEEsign(global_eid,&ret,&jout);
   Just just;
   if (status==SGX_SUCCESS && ret==SGX_SUCCESS) just=getJust(&jout);
-#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(CHAINED_ACHILLES)
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
@@ -1404,7 +1426,7 @@ Just Handler::callTEEprepareComb(Block block, Accum acc, NewViewProofComb proof)
   sgx_status_t status=DAMYSUS_TEEprepare(global_eid,&ret,&hin,&ain,&jout);
   Just just;
   if (status==SGX_SUCCESS && ret==SGX_SUCCESS) just=getJust(&jout);
-#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(CHAINED_ACHILLES)
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
@@ -1459,7 +1481,7 @@ Just Handler::callTEEstoreComb(Just j) {
   sgx_status_t status=DAMYSUS_TEEstore(global_eid,&ret,&jin,&jout);
   Just just;
   if (status==SGX_SUCCESS && ret==SGX_SUCCESS) just=getJust(&jout);
-#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(CHAINED_ACHILLES)
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
@@ -1494,7 +1516,12 @@ Just Handler::callTEEstoreComb(Just j) {
 
 Just Handler::callTEEsignChComb() {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(CHAINED_ACHILLES)
+  just_t jout = {}; sgx_status_t ret;
+  sgx_status_t status=ACHILLES_CH_TEEsign(global_eid,&ret,&jout);
+  Just just;
+  if (status==SGX_SUCCESS && ret==SGX_SUCCESS) just=getJust(&jout);
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
   just_t jout;
   sgx_status_t ret;
   sgx_status_t status = CH_COMB_TEEsign(global_eid, &ret, &jout);
@@ -1512,7 +1539,13 @@ Just Handler::callTEEsignChComb() {
 
 Just Handler::callTEEprepareChComb(CBlock block, Hash hash) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(CHAINED_ACHILLES)
+  just_t jout = {}; cblock_t cin; hash_t hin;
+  setCBlock(block,&cin); setHash(hash,&hin); sgx_status_t ret;
+  sgx_status_t status=ACHILLES_CH_TEEprepare(global_eid,&ret,&cin,&hin,&jout);
+  Just just;
+  if (status==SGX_SUCCESS && ret==SGX_SUCCESS) just=getJust(&jout);
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
   just_t jout;
   // 1st block
   cblock_t cin;
@@ -1539,7 +1572,12 @@ Just Handler::callTEEprepareChComb(CBlock block, Hash hash) {
 
 Accum Handler::callTEEaccumChComb(Just justs[MAX_NUM_SIGNATURES]) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(CHAINED_ACHILLES)
+  accum_t aout = {}; onejusts_t jin; setOneJusts(justs,&jin); sgx_status_t ret;
+  sgx_status_t status=ACHILLES_CH_TEEaccum(global_eid,&ret,&jin,&aout);
+  Accum acc;
+  if (status==SGX_SUCCESS && ret==SGX_SUCCESS) acc=getAccum(&aout);
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
   accum_t aout;
   onejusts_t jin;
   setOneJusts(justs,&jin);
@@ -1560,7 +1598,12 @@ Accum Handler::callTEEaccumChComb(Just justs[MAX_NUM_SIGNATURES]) {
 // a simpler version of callTEEaccumChComb for when all votes are for the same payload
 Accum Handler::callTEEaccumChCombSp(just_t just) {
   auto start = std::chrono::steady_clock::now();
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(CHAINED_ACHILLES)
+  accum_t aout = {}; sgx_status_t ret;
+  sgx_status_t status=ACHILLES_CH_TEEaccumSp(global_eid,&ret,&just,&aout);
+  Accum acc;
+  if (status==SGX_SUCCESS && ret==SGX_SUCCESS) acc=getAccum(&aout);
+#elif defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
   accum_t aout;
   sgx_status_t ret;
   sgx_status_t status = CH_COMB_TEEaccumSp(global_eid, &ret, &just, &aout);
@@ -1663,6 +1706,17 @@ void Handler::getStarted() {
     MsgNewViewComb msg(j.getRData(),j.getSigns().get(0));
     if (amCurrentLeader()) { handleNewviewComb(msg); }
     else { sendMsgNewViewComb(msg,recipients); }
+  }
+#elif defined(CHAINED_ACHILLES)
+  Just j = callTEEsignChComb();
+  MsgNewViewChComb msg(j.getRData(),j.getSigns().get(0));
+  this->view = 1;
+  this->cblocks[0] = CBlock();
+  stats.startExecTime(0,std::chrono::steady_clock::now());
+  if (amCurrentLeader()) { handleNewviewChComb(msg); }
+  else {
+    sendMsgNewViewChComb(msg,nextRecipients);
+    handleEarlierMessagesChComb();
   }
 #else
   #error "Unsupported protocol macro for Handler::getStarted"
@@ -3707,6 +3761,18 @@ void Handler::handle_precommit_damysus(MsgPreCommitDamysus msg, const PeerNet::c
 
 void Handler::handle_commit_damysus(MsgCommitDamysus msg, const PeerNet::conn_t &) {
   handleCommitComb(MsgCommitComb(msg.data,msg.signs));
+}
+
+void Handler::handle_newview_achilles_ch(MsgNewViewAchillesCh msg, const PeerNet::conn_t &) {
+  handleNewviewChComb(MsgNewViewChComb(msg.data,msg.sign));
+}
+
+void Handler::handle_ldrprepare_achilles_ch(MsgLdrPrepareAchillesCh msg, const PeerNet::conn_t &) {
+  handleLdrPrepareChComb(MsgLdrPrepareChComb(msg.block,msg.sign));
+}
+
+void Handler::handle_prepare_achilles_ch(MsgPrepareAchillesCh msg, const PeerNet::conn_t &) {
+  handlePrepareChComb(MsgPrepareChComb(msg.data,msg.sign));
 }
 
 

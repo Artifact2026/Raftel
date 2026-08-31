@@ -25,7 +25,7 @@
 
 // ------------------------------------
 // SGX related stuff
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS) || defined(CHAINED_ACHILLES)
 //
 #include "Enclave_u.h"
 #include "sgx_urts.h"
@@ -40,7 +40,7 @@
 #include "TrustedChComb.h"
 //
 #else
-#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_HYBRID_TEE, BASIC_HYBRID_TEE_DEBUG, CHAINED_HYBRID_TEE_DEBUG, BASIC_HOTSTUFF, BASIC_DAMYSUS."
+#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_HYBRID_TEE, BASIC_HYBRID_TEE_DEBUG, CHAINED_HYBRID_TEE_DEBUG, BASIC_HOTSTUFF, BASIC_DAMYSUS, CHAINED_ACHILLES."
 #endif
 // ------------------------------------
 
@@ -318,6 +318,9 @@ class Handler {
   void handle_prepare_damysus(MsgPrepareDamysus msg, const PeerNet::conn_t &conn);
   void handle_precommit_damysus(MsgPreCommitDamysus msg, const PeerNet::conn_t &conn);
   void handle_commit_damysus(MsgCommitDamysus msg, const PeerNet::conn_t &conn);
+  void handle_newview_achilles_ch(MsgNewViewAchillesCh msg, const PeerNet::conn_t &conn);
+  void handle_ldrprepare_achilles_ch(MsgLdrPrepareAchillesCh msg, const PeerNet::conn_t &conn);
+  void handle_prepare_achilles_ch(MsgPrepareAchillesCh msg, const PeerNet::conn_t &conn);
   void handle_transaction(MsgTransaction msg, const ClientNet::conn_t &conn);
   void handle_start(MsgStart msg, const ClientNet::conn_t &conn);
   //void handle_stop(MsgStop msg, const ClientNet::conn_t &conn);

@@ -55,6 +55,11 @@ sgx_status_t CH_COMB_TEEsign(just_t* just);
 sgx_status_t CH_COMB_TEEprepare(cblock_t* block, hash_t* hash, just_t* res);
 sgx_status_t CH_COMB_TEEaccum(onejusts_t* js, accum_t* res);
 sgx_status_t CH_COMB_TEEaccumSp(just_t* just, accum_t* res);
+sgx_status_t ACHILLES_CH_TEEsign(just_t* just);
+sgx_status_t ACHILLES_CH_TEEverify(just_t* just, unsigned int* res);
+sgx_status_t ACHILLES_CH_TEEprepare(cblock_t* block, hash_t* hash, just_t* res);
+sgx_status_t ACHILLES_CH_TEEaccum(onejusts_t* js, accum_t* res);
+sgx_status_t ACHILLES_CH_TEEaccumSp(just_t* just, accum_t* res);
 
 sgx_status_t SGX_CDECL ocall_print(const char* str);
 sgx_status_t SGX_CDECL ocall_test(KEY* key);

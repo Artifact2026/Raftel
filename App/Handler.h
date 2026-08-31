@@ -94,7 +94,7 @@ class Handler {
   unsigned int tqsize;           // tee quorum size
   unsigned int total;            // total number of nodes
   unsigned int totalTEE;         // total number of TEE nodes
-  bool fastQC;                   // if the active TEE nodes is more than f+1
+  bool fastQC = false;           // true iff the configured TEE population can form QT
   Nodes nodes;                   // collection of the other nodes
   KEY priv;                      // private key
   View view = 0;                 // current view - initially 0
@@ -134,6 +134,12 @@ class Handler {
   //new 
   std::set<View> processedNewViews;
   std::set<View> processedCommit;
+  // Preserve later-view certificates until this replica reaches that view.
+  // Peer delivery is not ordered across connections, so a QC may legitimately
+  // arrive before the proposal/commit for the preceding view.
+  std::map<View,std::set<MsgPrepareComb>> futurePrepareQCs;
+  std::map<View,std::set<MsgPreCommitComb>> futurePreCommitQCs;
+  std::map<View,std::set<MsgCommitComb>> futureCommitQCs;
 
   std::list<Transaction> transactions; // current waiting to be processed
   std::map<View,Block> blocks; // blocks received in each view
@@ -188,6 +194,7 @@ class Handler {
   std::string nfo();
 
   bool timeToStop();
+  bool timeToStopComb();
   /** Live throughput: add block.getSize() (non-dummy tx in committed block) at commit boundary. */
   void addLiveCommittedTxsAtCommit(View propView, Hash blockHash);
   void recordLiveStats();
@@ -196,6 +203,14 @@ class Handler {
 
   Sign Ssign(KEY priv, PID signer, std::string text);
   bool Sverify(Signs signs, PID id, Nodes nodes, std::string s);
+
+  // HybridTEE certificate validation.  A valid QC has an exact quorum of
+  // distinct, known signers; a TEE-QC additionally contains only TEE nodes.
+  bool verifyCombSigns(RData data, Signs signs,
+                       unsigned int expectedSize, bool teeOnly);
+  bool verifyCombQC(RData data, Signs signs, Phase1 expectedPhase);
+  bool verifyCombVote(RData data, Signs signs, Phase1 expectedPhase);
+  bool verifyNewViewComb(MsgNewViewComb msg);
 
   // To stop clients once all have stopped
   //void checkStopClients();
@@ -372,7 +387,7 @@ class Handler {
   void decideComb(RData data, const std::string& qcType);
 
   // For backups to respond to correct MsgLdrPrepareComb messages received from leaders
-  void respondToLdrPrepareComb(Block block, Accum acc);
+  void respondToLdrPrepareComb(Block block, Accum acc, NewViewProofComb proof);
   // For backups to respond to MsgPrepareComb messages receveid from leaders
   void respondToPrepareComb(MsgPrepareComb msg);
   // For backups to respond to MsgPreCommitComb messages receveid from leaders
@@ -385,7 +400,7 @@ class Handler {
   Accum callTEEaccumComb(Just justs[MAX_NUM_SIGNATURES]);
   Accum callTEEaccumCombSp(just_t just);
   Just callTEEsignComb();
-  Just callTEEprepareComb(Hash h, Accum acc);
+  Just callTEEprepareComb(Block block, Accum acc, NewViewProofComb proof);
   Just callTEEstoreComb(Just j);
 
   void handleNewviewComb(MsgNewViewComb msg);

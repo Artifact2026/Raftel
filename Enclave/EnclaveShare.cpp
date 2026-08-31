@@ -102,9 +102,16 @@ bool verifySign(sign_t s, KEY pub, std::string text) {
 
 
 bool verifySigns(signs_t signs, PID id, std::map<PID,KEY> pubs, std::string s) {
+  if (signs.size == 0 || signs.size > MAX_NUM_SIGNATURES) {
+    return false;
+  }
+  std::set<PID> unique;
   for (int i = 0; i < signs.size; i++) {
     sign_t sign = signs.signs[i];
     PID node = sign.signer;
+    if (!sign.set || !unique.insert(node).second) {
+      return false;
+    }
     if (true) { //(id != node) { // we don't check our own signature
       std::map<PID,KEY>::iterator it = pubs.find(node);
       if (it != pubs.end()) {
@@ -131,6 +138,21 @@ bool verifyText(signs_t signs, std::string text) {
   //double time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   //cryptoTime += time;
   return b;
+}
+
+bool verifyQuorum(signs_t signs, std::string text,
+                  unsigned int expectedSize, bool teeOnly) {
+  if (expectedSize == 0 || expectedSize > MAX_NUM_SIGNATURES
+      || signs.size != expectedSize) {
+    return false;
+  }
+  for (unsigned int i = 0; i < signs.size; ++i) {
+    std::map<PID, bool>::const_iterator it = node_is_TEE.find(signs.signs[i].signer);
+    if (it == node_is_TEE.end() || (teeOnly && !it->second)) {
+      return false;
+    }
+  }
+  return verifyText(signs, text);
 }
 
 

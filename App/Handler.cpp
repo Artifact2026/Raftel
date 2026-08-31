@@ -8,6 +8,7 @@
 #include <random>
 #include <string>
 #include <cstring>
+#include <stdexcept>
 #include <mutex>
 
 #include <unistd.h>
@@ -429,6 +430,32 @@ void setJBlock(JBlock block, jblock_t *b) {
   }
 }
 
+void setBasicBlock(Block block, basicblock_t *b) {
+  b->id = block.getId();
+  b->set = block.isSet();
+  setHash(block.getPrevHash(), &b->prev_hash);
+  b->size = block.getSize();
+  Transaction *transactions = block.getTransactions();
+  for (unsigned int i = 0; i < MAX_NUM_TRANSACTIONS; ++i) {
+    b->trans[i].clientid = transactions[i].getCid();
+    b->trans[i].transid = transactions[i].getTid();
+    if (PAYLOAD_SIZE > 0) {
+      memcpy(b->trans[i].data, transactions[i].getData(), PAYLOAD_SIZE);
+    }
+  }
+}
+
+void setNewViews(NewViewProofComb proof, newviews_t *out) {
+  out->size = proof.size;
+  for (unsigned int i = 0; i < MAX_NUM_SIGNATURES; ++i) {
+    out->justs[i].set = i < proof.size;
+    setRData(proof.data[i], &out->justs[i].rdata);
+    out->justs[i].sign.set = proof.signs[i].isSet();
+    out->justs[i].sign.signer = proof.signs[i].getSigner();
+    memcpy(out->justs[i].sign.sign, proof.signs[i].getSign(), SIGN_LEN);
+  }
+}
+
 void setCert(Cert cert, cert_t *c) {
   c->view=cert.getView();
   setHash(cert.getHash(),&(c->hash));
@@ -536,6 +563,11 @@ int Handler::initializeSGX() {
 
   sgx_status_t ret, status;
   status = initialize_variables(global_eid, &ret, &(this->myid), &others, &(this->qsize), &(this->tqsize), &enc_nodes);
+  if (status != SGX_SUCCESS || ret != SGX_SUCCESS) {
+    std::cout << nfo() << " failed to initialize enclave variables: ecall="
+              << status << ", trusted=" << ret << std::endl;
+    return 1;
+  }
   if (DEBUG1) std::cout << KBLU << nfo() << "enclave variables are initialized" << KNRM << std::endl;
 
   return 0;
@@ -548,7 +580,7 @@ int Handler::initializeSGX() {
 void Handler::startNewViewOnTimeout() {
   // Blame the nominal leader for this view (same index as pre-skip rotation) so the next
   // timeout-driven view-change does not schedule that replica as leader again while suspected down.
-  unsigned int pool = (this->totalTEE == 0) ? this->total : this->totalTEE;
+  unsigned int pool = this->total;
   if (pool > 0) {
     unsigned int suspected = static_cast<unsigned int>(this->view % pool);
     skippedLeaders.insert(suspected);
@@ -598,14 +630,22 @@ pnet(pec,pconf), cnet(cec,cconf) {
   this->total        = (constFactor*this->numFaults)+1;
   this->totalTEE     = totaltee;
   this->qsize        = this->total-this->numFaults;
-  this->tqsize       = this->numFaults + 1;
+  // Raftel: QT = max(floor(m/2)+1, f+1).  The first term gives
+  // TEE/TEE quorum intersection; the second gives TEE/Mixed intersection.
+  this->tqsize       = std::max((this->totalTEE / 2) + 1,
+                               this->numFaults + 1);
   this->nodes        = nodes;
   this->priv         = priv;
   this->maxViews     = maxViews;
   this->kf           = k;
   // One Redis-backed KV executor per replica (local port = 6379 + replica id).
   this->kvExecutor.reset(new KVAppExecutor(static_cast<int>(this->myid), 6379 + static_cast<int>(this->myid)));
-  if (this->totalTEE >= this->tqsize){ this->fastQC = true; }  
+  this->fastQC       = this->totalTEE >= this->tqsize;
+#if defined(BASIC_HYBRID_TEE) || defined(BASIC_HYBRID_TEE_DEBUG)
+  // View 0 belongs to the genesis block.  The first protocol proposal is
+  // therefore in view 1, so its prepared view is strictly above genesis.
+  this->view         = 1;
+#endif
 
   if (DEBUG1) { std::cout << KBLU << nfo() << "starting handler" << KNRM << std::endl; }
   if (DEBUG1) { std::cout << KBLU << nfo() << "qsize=" << this->qsize << "tqsize=" << this->tqsize << KNRM << std::endl; }
@@ -613,7 +653,9 @@ pnet(pec,pconf), cnet(cec,cconf) {
   // Trusted Functions
 #if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
   if (DEBUG0) { std::cout << KBLU << nfo() << "initializing TEE" << KNRM << std::endl; }
-  initializeSGX();
+  if (initializeSGX() != 0) {
+    throw std::runtime_error("HybridTEE enclave initialization failed");
+  }
   if (DEBUG0) { std::cout << KBLU << nfo() << "initialized TEE" << KNRM << std::endl; }
 #if defined(BASIC_HYBRID_TEE)
   // Hybrid mode: non-TEE replicas execute comb logic outside enclave.
@@ -835,9 +877,9 @@ void Handler::printClientInfo() {
 
 // leader rotation
 unsigned int Handler::getLeaderOf(View v) {
-  // In some experiment configurations we may have `totalTEE == 0` (no TEE nodes).
-  // Leader candidates then come from all replicas; otherwise from TEE replicas.
-  unsigned int pool = (this->totalTEE == 0) ? this->total : this->totalTEE;
+  // Raftel rotates leadership over every replica.  The leader's trust type
+  // selects the fast path or the classical fallback path for that view.
+  unsigned int pool = this->total;
   if (pool == 0) { return 0; }
   unsigned int start = static_cast<unsigned int>(v % pool);
   for (unsigned int k = 0; k < pool; k++) {
@@ -898,24 +940,15 @@ std::string recipients2string(Peers recipients) {
 
 Peers Handler::remove_from_peers(PID id) {
   Peers ret;
-  
-  if (this->fastQC) {
-    // When fastQC is true, only broadcast to the first f+1 TEE nodes (excluding the specified id)
-    unsigned int count = 0;
-    unsigned int maxNodes = this->totalTEE;
-    
-    for (Peers::iterator it = this->peers.begin(); it != this->peers.end() && count < maxNodes; ++it) {
-      Peer peer = *it;
-      if (id != std::get<0>(peer)) { 
-        ret.push_back(peer);
-        count++;
-      }
-    }
-  } else {
-    // Original logic: broadcast to all peers except the specified id
+  // PrioBroadcast sends to TEE replicas first, but it must still disseminate
+  // to every other replica so that the Mixed-QC fallback remains live.
+  for (int teePass = 1; teePass >= 0; --teePass) {
     for (Peers::iterator it = this->peers.begin(); it != this->peers.end(); ++it) {
       Peer peer = *it;
-      if (id != std::get<0>(peer)) { ret.push_back(peer); }
+      PID peerId = std::get<0>(peer);
+      if (id != peerId && static_cast<int>(isTEE(peerId)) == teePass) {
+        ret.push_back(peer);
+      }
     }
   }
   
@@ -1202,22 +1235,23 @@ Accum Handler::callTEEaccumComb(Just justs[MAX_NUM_SIGNATURES]) {
 #if defined(BASIC_HYBRID_TEE)
   Accum acc;
   if (this->nodeType) {
-    accum_t aout;
+    accum_t aout = {};
     onejusts_t jin;
     setOneJusts(justs,&jin);
     sgx_status_t ret;
     sgx_status_t status = COMB_TEEaccum(global_eid, &ret, &jin, &aout);
-    acc = getAccum(&aout);
+    if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { acc = getAccum(&aout); }
   } else {
     acc = tc.TEEaccum(stats,this->nodes,justs);
   }
 #else
-  accum_t aout;
+  accum_t aout = {};
   onejusts_t jin;
   setOneJusts(justs,&jin);
   sgx_status_t ret;
   sgx_status_t status = COMB_TEEaccum(global_eid, &ret, &jin, &aout);
-  Accum acc = getAccum(&aout);
+  Accum acc;
+  if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { acc = getAccum(&aout); }
 #endif
 #else
   Accum acc = tc.TEEaccum(stats,this->nodes,justs);
@@ -1237,18 +1271,19 @@ Accum Handler::callTEEaccumCombSp(just_t just) {
 #if defined(BASIC_HYBRID_TEE)
   Accum acc;
   if (this->nodeType) {
-    accum_t aout;
+    accum_t aout = {};
     sgx_status_t ret;
     sgx_status_t status = COMB_TEEaccumSp(global_eid, &ret, &just, &aout);
-    acc = getAccum(&aout);
+    if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { acc = getAccum(&aout); }
   } else {
     acc = tc.TEEaccumSp(stats,this->nodes,just);
   }
 #else
-  accum_t aout;
+  accum_t aout = {};
   sgx_status_t ret;
   sgx_status_t status = COMB_TEEaccumSp(global_eid, &ret, &just, &aout);
-  Accum acc = getAccum(&aout);
+  Accum acc;
+  if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { acc = getAccum(&aout); }
 #endif
 #else
   Accum acc = tc.TEEaccumSp(stats,this->nodes,just);
@@ -1267,18 +1302,19 @@ Just Handler::callTEEsignComb() {
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
-    just_t jout;
+    just_t jout = {};
     sgx_status_t ret;
     sgx_status_t status = COMB_TEEsign(global_eid, &ret, &jout);
-    just = getJust(&jout);
+    if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { just = getJust(&jout); }
   } else {
     just = tc.TEEsign();
   }
 #else
-  just_t jout;
+  just_t jout = {};
   sgx_status_t ret;
   sgx_status_t status = COMB_TEEsign(global_eid, &ret, &jout);
-  Just just = getJust(&jout);
+  Just just;
+  if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { just = getJust(&jout); }
 #endif
 #else
   Just just = tc.TEEsign();
@@ -1290,38 +1326,47 @@ Just Handler::callTEEsignComb() {
   return just;
 }
 
-Just Handler::callTEEprepareComb(Hash h, Accum acc) {
+Just Handler::callTEEprepareComb(Block block, Accum acc, NewViewProofComb proof) {
   if (DEBUGH) std::cout << KRED << nfo() << "callTEEprepareComb" << KNRM << std::endl;
   auto start = std::chrono::steady_clock::now();
 #if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
-    just_t jout;
+    just_t jout = {};
     accum_t ain;
+    basicblock_t bin;
+    newviews_t nin;
     setAccum(acc,&ain);
-    hash_t hin;
-    setHash(h,&hin);
+    setBasicBlock(block,&bin);
+    setNewViews(proof,&nin);
     sgx_status_t ret;
-    sgx_status_t status = COMB_TEEprepare(global_eid, &ret, &hin, &ain, &jout);
-    just = getJust(&jout);
+    sgx_status_t status = COMB_TEEprepare(global_eid, &ret, &bin, &ain, &nin, &jout);
+    if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { just = getJust(&jout); }
   } else {
-    just = tc.TEEprepare(stats,this->nodes,h,acc);
+    newviews_t nin;
+    setNewViews(proof,&nin);
+    just = tc.TEEprepare(stats,this->nodes,block,acc,nin);
   }
   if (DEBUGH) std::cout << KRED << nfo() << "just: " << just.isSet() << KNRM << std::endl;
 #else
-  just_t jout;
+  just_t jout = {};
   accum_t ain;
+  basicblock_t bin;
+  newviews_t nin;
   setAccum(acc,&ain);
-  hash_t hin;
-  setHash(h,&hin);
+  setBasicBlock(block,&bin);
+  setNewViews(proof,&nin);
   sgx_status_t ret;
-  sgx_status_t status = COMB_TEEprepare(global_eid, &ret, &hin, &ain, &jout);
-  Just just = getJust(&jout);
+  sgx_status_t status = COMB_TEEprepare(global_eid, &ret, &bin, &ain, &nin, &jout);
+  Just just;
+  if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { just = getJust(&jout); }
   if (DEBUGH) std::cout << KRED << nfo() << "just: " << just.isSet() << KNRM << std::endl;
 #endif
 #else
-  Just just = tc.TEEprepare(stats,this->nodes,h,acc);
+  newviews_t nin;
+  setNewViews(proof,&nin);
+  Just just = tc.TEEprepare(stats,this->nodes,block,acc,nin);
 #endif
   auto end = std::chrono::steady_clock::now();
   double time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -1337,22 +1382,23 @@ Just Handler::callTEEstoreComb(Just j) {
 #if defined(BASIC_HYBRID_TEE)
   Just just;
   if (this->nodeType) {
-    just_t jout;
+    just_t jout = {};
     just_t jin;
     setJust(j,&jin);
     sgx_status_t ret;
     sgx_status_t status = COMB_TEEstore(global_eid, &ret, &jin, &jout);
-    just = getJust(&jout);
+    if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { just = getJust(&jout); }
   } else {
     just = tc.TEEstore(stats,this->nodes,j);
   }
 #else
-  just_t jout;
+  just_t jout = {};
   just_t jin;
   setJust(j,&jin);
   sgx_status_t ret;
   sgx_status_t status = COMB_TEEstore(global_eid, &ret, &jin, &jout);
-  Just just = getJust(&jout);
+  Just just;
+  if (status == SGX_SUCCESS && ret == SGX_SUCCESS) { just = getJust(&jout); }
 #endif
 #else
   Just just = tc.TEEstore(stats,this->nodes,j);
@@ -1846,6 +1892,19 @@ bool Handler::timeToStop() {
 }
 
 
+bool Handler::timeToStopComb() {
+  bool stop = this->maxViews > 0
+           && this->processedCommit.size() >= this->maxViews;
+  if (DEBUG1 && stop) {
+    std::cout << KBLU << nfo()
+              << "completed Comb views=" << this->processedCommit.size()
+              << ";maxViews=" << this->maxViews
+              << KNRM << std::endl;
+  }
+  return stop;
+}
+
+
 void Handler::executeRData(RData rdata) {
   //std::lock_guard<std::mutex> guard(mu_trans);
   this->addLiveCommittedTxsAtCommit(rdata.getPropv(), rdata.getProph());
@@ -2065,6 +2124,56 @@ bool Handler::Sverify(Signs signs, PID id, Nodes nodes, std::string s) {
   bool b = signs.verify(stats, id, nodes, s);
   //std::cout << KBLU << nfo() << "stats-2:" << stats.getCryptoVerifNum() << KNRM << std::endl;
   return b;
+}
+
+bool Handler::verifyCombSigns(RData data, Signs signs,
+                              unsigned int expectedSize, bool teeOnly) {
+  if (expectedSize == 0 || expectedSize > MAX_NUM_SIGNATURES
+      || signs.getSize() != expectedSize) {
+    return false;
+  }
+
+  std::set<PID> unique;
+  for (unsigned int i = 0; i < signs.getSize(); ++i) {
+    Sign sign = signs.get(i);
+    PID signer = sign.getSigner();
+    NodeInfo *node = this->nodes.find(signer);
+    if (!sign.isSet() || node == NULL || !unique.insert(signer).second) {
+      return false;
+    }
+    if (teeOnly && !node->getIsTEE()) {
+      return false;
+    }
+  }
+  return Sverify(signs, this->myid, this->nodes, data.toString());
+}
+
+bool Handler::verifyCombQC(RData data, Signs signs,
+                           Phase1 expectedPhase) {
+  if (data.getPhase() != expectedPhase) {
+    return false;
+  }
+  if (signs.getSize() == this->tqsize) {
+    if (verifyCombSigns(data, signs, this->tqsize, true)) {
+      return true;
+    }
+  }
+  if (signs.getSize() == this->qsize) {
+    return verifyCombSigns(data, signs, this->qsize, false);
+  }
+  return false;
+}
+
+bool Handler::verifyCombVote(RData data, Signs signs,
+                             Phase1 expectedPhase) {
+  return data.getPhase() == expectedPhase
+      && verifyCombSigns(data, signs, 1, false);
+}
+
+bool Handler::verifyNewViewComb(MsgNewViewComb msg) {
+  Signs signs(msg.sign);
+  return msg.data.getPhase() == PH1_NEWVIEW
+      && verifyCombSigns(msg.data, signs, 1, false);
 }
 
 
@@ -2764,7 +2873,7 @@ void Handler::handle_precommitacc(MsgPreCommitAcc msg, const PeerNet::conn_t &co
 
 
 Accum Handler::newviews2accComb(const std::set<MsgNewViewComb>& newviews, unsigned int requiredSize) {
-  Just justs[requiredSize];
+  Just justs[MAX_NUM_SIGNATURES];
   RData rdata;
   Signs ss;
 
@@ -2797,13 +2906,24 @@ Accum Handler::newviews2accComb(const std::set<MsgNewViewComb>& newviews, unsign
 void Handler::prepareComb() {
   // Dual-QC Priority 
   std::set<MsgNewViewComb> teeNewviews = this->log.getTEENewViewComb(this->view, this->tqsize);
-  std::set<MsgNewViewComb> normalNewviews = this->log.getNewViewComb(this->view, this->qsize);
-  if (teeNewviews.size() == this->tqsize) {
+  std::set<MsgNewViewComb> nonTeeNewviews = this->log.getNewViewComb(this->view, this->qsize);
+  if (this->fastQC && teeNewviews.size() >= this->tqsize) {
       if (DEBUGH) std::cout << KRED << nfo() << "TEE QC"  << KNRM << std::endl;
       processQC(teeNewviews, "TEE");
-  }else if (normalNewviews.size() == this->qsize) {
+  } else {
+    std::set<MsgNewViewComb> mixedNewviews;
+    for (std::set<MsgNewViewComb>::const_iterator it = teeNewviews.begin();
+         it != teeNewviews.end() && mixedNewviews.size() < this->qsize; ++it) {
+      mixedNewviews.insert(*it);
+    }
+    for (std::set<MsgNewViewComb>::const_iterator it = nonTeeNewviews.begin();
+         it != nonTeeNewviews.end() && mixedNewviews.size() < this->qsize; ++it) {
+      mixedNewviews.insert(*it);
+    }
+    if (mixedNewviews.size() == this->qsize) {
       if (DEBUGH) std::cout << KRED << nfo() << "Mixed QC" << KNRM << std::endl;
-      processQC(normalNewviews, "Normal");
+      processQC(mixedNewviews, "Normal");
+    }
   }
 }
 
@@ -2813,7 +2933,6 @@ void Handler::processQC(const std::set<MsgNewViewComb>& newviews, const std::str
     if (DEBUG1) std::cout << KRED << nfo() << "view " << this->view << " already processed, skip duplicate QC" << KNRM << std::endl;
     return;
   }
-  processedNewViews.insert(this->view);
 
   Accum acc;
   if (qcType == "TEE"){
@@ -2826,8 +2945,12 @@ void Handler::processQC(const std::set<MsgNewViewComb>& newviews, const std::str
       return;
   }
   Block block = createNewBlock(acc.getPreph());
-  Just justPrep = callTEEprepareComb(block.hash(), acc);
+  NewViewProofComb proof(newviews);
+  Just justPrep = callTEEprepareComb(block, acc, proof);
   if (!justPrep.isSet()) return;
+  // Mark the view only after the complete proof and safe extension have both
+  // been accepted by Checker+.
+  processedNewViews.insert(this->view);
 
   if (DEBUG1) std::cout << KBLU << nfo() << "storing block for " << qcType << " view=" << this->view << ":" << block.prettyPrint() << KNRM << std::endl;
   this->blocks[this->view] = block;
@@ -2838,7 +2961,7 @@ void Handler::processQC(const std::set<MsgNewViewComb>& newviews, const std::str
   if (msgPrep.signs.getSize() == 1) {
       Sign sig = msgPrep.signs.get(0);
       auto start = std::chrono::steady_clock::now();
-      MsgLdrPrepareComb msgLdrPrep(acc, block, sig);
+      MsgLdrPrepareComb msgLdrPrep(acc, block, proof, sig);
       Peers recipients = remove_from_peers_pure(this->myid);
       sendMsgLdrPrepareComb(msgLdrPrep, recipients);
       auto end = std::chrono::steady_clock::now();
@@ -2863,7 +2986,7 @@ void Handler::handleNewviewComb(MsgNewViewComb msg) {
   auto start = std::chrono::steady_clock::now();
   if (DEBUG1) std::cout << KBLU << nfo() << "handling:" << msg.prettyPrint() << KNRM << std::endl;
   View v = msg.data.getPropv();
-  if (v >= this->view && amLeaderOf(v)) {
+  if (v >= this->view && amLeaderOf(v) && verifyNewViewComb(msg)) {
     if (DEBUG1) std::cout << KRED << nfo() << "singer:" << msg.sign.getSigner() << "TEE singer:" << isTEE(msg.sign.getSigner()) << KNRM << std::endl;
     unsigned int teecount =0 ;
     unsigned int ncount = 0;
@@ -2876,10 +2999,18 @@ void Handler::handleNewviewComb(MsgNewViewComb msg) {
       // if (this->log.storeNvComb(msg) == this->qsize && v == this->view) { prepareComb(); }
       ncount = this->log.storeNvComb(msg);
     }
-    // if (this->phase == Phase:: NEWVIEW && (teecount == this->tqsize || (teecount + ncount) == this->qsize)) {
-    if (teecount == this->tqsize || (teecount + ncount) == this->qsize) {
-      this->phase = Phase::PREPARE;
-      prepareComb(); }
+    // Re-read both cumulative counts: the triggering message can belong to
+    // either half of a Mixed-QC.
+    teecount = this->log.getTEENewViewComb(v, this->tqsize).size();
+    ncount = this->log.getNewViewComb(v, this->qsize).size();
+    if (this->phase == Phase::NEWVIEW
+        && ((this->fastQC && teecount >= this->tqsize)
+            || (teecount + ncount) >= this->qsize)) {
+      prepareComb();
+      if (processedNewViews.count(this->view)) {
+        this->phase = Phase::PREPARE;
+      }
+    }
 
   }else {
     if (DEBUG1) std::cout << KMAG << nfo() << "discarded:" << msg.prettyPrint() << KNRM << std::endl;
@@ -2902,13 +3033,19 @@ bool Handler::verifyLdrPrepareComb(MsgLdrPrepareComb msg) {
   Block block = msg.block;
   RData rdataLdrPrep(block.hash(),acc.getView(),acc.getPreph(),acc.getPrepv(),PH1_PREPARE);
   Signs signs = Signs(msg.sign);
-  return Sverify(signs,this->myid,this->nodes,rdataLdrPrep.toString());
+  PID leader = getLeaderOf(acc.getView());
+  Signs accumSign(acc.getSign());
+  return acc.isSet() && msg.sign.isSet()
+      && msg.sign.getSigner() == leader
+      && acc.getSign().getSigner() == leader
+      && Sverify(accumSign, this->myid, this->nodes, acc.data2string())
+      && Sverify(signs,this->myid,this->nodes,rdataLdrPrep.toString());
 }
 
 
 // For backups to respond to correct MsgLdrPrepareComb messages received from leaders
-void Handler::respondToLdrPrepareComb(Block block, Accum acc) {
-  Just justPrep = callTEEprepareComb(block.hash(),acc);
+void Handler::respondToLdrPrepareComb(Block block, Accum acc, NewViewProofComb proof) {
+  Just justPrep = callTEEprepareComb(block,acc,proof);
   if (justPrep.isSet()) {
     if (DEBUG1) std::cout << KBLU << nfo() << "storing block for view=" << this->view << ":" << block.prettyPrint() << KNRM << std::endl;
     this->blocks[this->view]=block;
@@ -2936,7 +3073,7 @@ void Handler::handleLdrPrepareComb(MsgLdrPrepareComb msg) {
       && (acc.getSize() == this->qsize ||acc.getSize() == this->tqsize)
       && block.extends(hash)) {
     if (v == this->view) {
-      respondToLdrPrepareComb(block,acc);
+      respondToLdrPrepareComb(block,acc,msg.proof);
     } else {
       // If the message is for later, we store it
       if (DEBUG1) std::cout << KMAG << nfo() << "storing:" << msg.prettyPrint() << KNRM << std::endl;
@@ -2972,6 +3109,10 @@ void Handler::handlePrepareComb(MsgPrepareComb msg) {
   View v = data.getPropv();
   if (v == this->view) {
     if (amLeaderOf(v)) {
+      if (!verifyCombVote(data, msg.signs, PH1_PREPARE)) {
+        if (DEBUG1) std::cout << KMAG << nfo() << "discarded invalid prepare vote" << KNRM << std::endl;
+        return;
+      }
       unsigned int teecount = 0;
       unsigned int ncount = 0;
       // Count TEE and non-TEE signatures
@@ -2985,7 +3126,7 @@ void Handler::handlePrepareComb(MsgPrepareComb msg) {
         if (ncount != 0){teecount = (this->log).getTEEPrepareComb(v, this->tqsize).getSize();}
       }
 
-      if ((teecount == this->tqsize) && this->phase == Phase::PREPARE) {
+      if (this->fastQC && (teecount >= this->tqsize) && this->phase == Phase::PREPARE) {
         if (DEBUGH) std::cout << KRED << nfo() << "enough tee message:" << msg.prettyPrint() << KNRM << std::endl;
         if(isTEE(getCurrentLeader())){
           this->phase = Phase::NEWVIEW;
@@ -3008,11 +3149,19 @@ void Handler::handlePrepareComb(MsgPrepareComb msg) {
 
     } else {
       // Backups wait for a MsgPrepareAcc message from the leader that contains qsize signatures in the pre-commit phase
-      respondToPrepareComb(msg);
+      if (verifyCombQC(data, msg.signs, PH1_PREPARE)) {
+        respondToPrepareComb(msg);
+      }
     }
-  } else {
-    if (DEBUG1) std::cout << KMAG << nfo() << "storing:" << msg.prettyPrint() << KNRM << std::endl;
-    if (v > this->view) { log.storePrepComb(msg); }
+  } else if (v > this->view) {
+    if (verifyCombQC(data, msg.signs, PH1_PREPARE)) {
+      if (DEBUG1) std::cout << KMAG << nfo() << "storing validated future prepare QC:" << msg.prettyPrint() << KNRM << std::endl;
+      this->futurePrepareQCs[v].insert(msg);
+    } else if (verifyCombVote(data, msg.signs, PH1_PREPARE)) {
+      if (DEBUG1) std::cout << KMAG << nfo() << "storing validated future prepare vote:" << msg.prettyPrint() << KNRM << std::endl;
+      if (isTEE(msg.signs.get(0).getSigner())) { log.storeTEEPrepComb(msg); }
+      else { log.storePrepComb(msg); }
+    }
   }
   auto end = std::chrono::steady_clock::now();
   double time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -3028,27 +3177,65 @@ void Handler::handleEarlierMessagesComb() {
   // *** THIS IS FOR LATE NODES TO PRO-ACTIVELY PROCESS MESSAGES THEY HAVE ALREADY RECEIVED FOR THE NEW VIEW ***
   // We now check whether we already have enough information to start the next view if we're the leader
   if (amCurrentLeader()) {
-    std::set<MsgNewViewComb> newviews = this->log.getNewViewComb(this->view,this->qsize);
-    if (newviews.size() == this->qsize) {
+    std::set<MsgNewViewComb> teeNewviews = this->log.getTEENewViewComb(this->view,this->tqsize);
+    std::set<MsgNewViewComb> normalNewviews = this->log.getNewViewComb(this->view,this->qsize);
+    if ((this->fastQC && teeNewviews.size() >= this->tqsize)
+        || teeNewviews.size() + normalNewviews.size() >= this->qsize) {
       if (DEBUG1X) std::cout << KMAG << nfo() << "leader catching up (" << this->view << ")" << KNRM << std::endl;
       // we have enough new view messages to start the new view
       prepareComb();
     }
   } else {
-    // Backup nodes check if there is a prepare certificate with qsize signatures,
-    // which now serves as the commit certificate.
-    Signs signsPrep = (this->log).getPrepareComb(this->view,this->qsize);
-    if (signsPrep.getSize() == this->qsize) {
-      if (DEBUG1X) std::cout << KMAG << nfo() << "catching up using prepare certificate (" << this->view << ")" << KNRM << std::endl;
-      MsgPrepareComb msgPrep = this->log.firstPrepareComb(this->view);
-      // Directly respond to the prepare message, which will trigger execution.
-      respondToPrepareComb(msgPrep);
-    } else {
-      MsgLdrPrepareComb msgProp = this->log.firstLdrPrepareComb(this->view);
-      if (msgProp.sign.isSet()) { // If we've stored the leader's proposal
-        if (DEBUG1X) std::cout << KMAG << nfo() << "catching up using leader proposal" << KNRM << std::endl;
-        respondToLdrPrepareComb(msgProp.block,msgProp.acc);
-      }
+    View catchupView = this->view;
+    // Replay the proposal first.  It records the block and advances the local
+    // trusted state before any certificate for this view is consumed.
+    MsgLdrPrepareComb msgProp = this->log.firstLdrPrepareComb(catchupView);
+    if (msgProp.sign.isSet()) {
+      if (DEBUG1X) std::cout << KMAG << nfo() << "catching up using leader proposal" << KNRM << std::endl;
+      respondToLdrPrepareComb(msgProp.block,msgProp.acc,msgProp.proof);
+    }
+
+    // Never advance the trusted phase for a certificate whose block is still
+    // unavailable.  Keep the QC cached until a later catch-up attempt.
+    std::map<View,Block>::iterator blockIt = this->blocks.find(catchupView);
+    if (blockIt == this->blocks.end()) { return; }
+
+    // Then replay intact future QCs in protocol order.  This is required when
+    // a slow replica receives v's certificates while it is still executing
+    // v-1; treating those multi-signature messages as votes loses the QC.
+    std::map<View,std::set<MsgPrepareComb>>::iterator prepIt =
+        this->futurePrepareQCs.find(catchupView);
+    bool replayedPrepare = false;
+    if (prepIt != this->futurePrepareQCs.end() && !prepIt->second.empty()) {
+      MsgPrepareComb qc = *(prepIt->second.begin());
+      if (!(blockIt->second.hash() == qc.data.getProph())) { return; }
+      this->futurePrepareQCs.erase(prepIt);
+      respondToPrepareComb(qc);
+      replayedPrepare = true;
+      // A TEE leader's prepare QC is final and execution starts the next view.
+      if (this->view != catchupView) { return; }
+    }
+
+    std::map<View,std::set<MsgPreCommitComb>>::iterator pcIt =
+        this->futurePreCommitQCs.find(catchupView);
+    bool replayedPreCommit = false;
+    if (replayedPrepare
+        && pcIt != this->futurePreCommitQCs.end() && !pcIt->second.empty()) {
+      MsgPreCommitComb qc = *(pcIt->second.begin());
+      if (!(blockIt->second.hash() == qc.data.getProph())) { return; }
+      this->futurePreCommitQCs.erase(pcIt);
+      respondToPreCommitComb(qc);
+      replayedPreCommit = true;
+    }
+
+    std::map<View,std::set<MsgCommitComb>>::iterator commitIt =
+        this->futureCommitQCs.find(catchupView);
+    if (replayedPreCommit
+        && commitIt != this->futureCommitQCs.end() && !commitIt->second.empty()) {
+      MsgCommitComb qc = *(commitIt->second.begin());
+      if (!(blockIt->second.hash() == qc.data.getProph())) { return; }
+      this->futureCommitQCs.erase(commitIt);
+      respondToCommitComb(qc);
     }
   }
 }
@@ -3063,6 +3250,7 @@ void Handler::respondToPrepareComb(MsgPrepareComb msg) {
     } else{
       if (DEBUG1) { std::cout << KMAG << nfo() << "send pre-commit" << KNRM << std::endl; }
       Just justPc = callTEEstoreComb(Just(msg.data,msg.signs));
+      if (!justPc.isSet()) { return; }
       if (DEBUG1) { std::cout << KMAG << nfo() << "TEEstoreComb just:" << justPc.prettyPrint() << KNRM << std::endl; }
       MsgPreCommitComb msgPc(justPc.getRData(),justPc.getSigns());
       Peers recipients = keep_from_peers(getCurrentLeader());
@@ -3077,8 +3265,12 @@ void Handler::respondToPrepareComb(MsgPrepareComb msg) {
 // TODO: also trigger new-views when there is a timeout
 void Handler::startNewViewComb() {
   Just just = callTEEsignComb();
+  if (!just.isSet()) { return; }
   // generate justifications until we can generate one for the next view
-  while (just.getRData().getPropv() <= this->view) { just = callTEEsignComb(); }
+  while (just.getRData().getPropv() <= this->view) {
+    just = callTEEsignComb();
+    if (!just.isSet()) { return; }
+  }
   // increment the view
   // *** THE NODE HAS NOW MOVED TO THE NEW-VIEW ***
   this->view++;
@@ -3110,6 +3302,15 @@ void Handler::startNewViewComb() {
 
 
 void Handler::executeComb(RData data) {
+  if (processedCommit.count(data.getPropv())) {
+    return;
+  }
+  std::map<View,Block>::iterator bit = this->blocks.find(data.getPropv());
+  if (bit == this->blocks.end() || !(bit->second.hash() == data.getProph())) {
+    if (DEBUG1) std::cout << KMAG << nfo() << "refusing to execute unavailable/mismatched block" << KNRM << std::endl;
+    return;
+  }
+  processedCommit.insert(data.getPropv());
   //std::lock_guard<std::mutex> guard(mu_trans);
   this->addLiveCommittedTxsAtCommit(data.getPropv(), data.getProph());
   auto endView = std::chrono::steady_clock::now();
@@ -3127,7 +3328,7 @@ void Handler::executeComb(RData data) {
   // Reply
   replyHash(data.getProph());
 
-  if (timeToStop()) {
+  if (timeToStopComb()) {
     recordStats();
   } else {
     startNewViewComb();
@@ -3137,11 +3338,7 @@ void Handler::executeComb(RData data) {
 
 // Checks that it contains qsize correct signatures
 bool Handler::verifyPrepareCombCert(MsgPrepareComb msg) {
-  Signs signs = msg.signs;
-  if (signs.getSize() == this->qsize || signs.getSize() == this->tqsize) {
-    return Sverify(signs,this->myid,this->nodes,msg.data.toString());
-  }
-  return false;
+  return verifyCombQC(msg.data, msg.signs, PH1_PREPARE);
 }
 
 // For leaders to send pre-commit certificates to backups at the beginning the decide phase
@@ -3152,13 +3349,13 @@ void Handler::decideComb(RData data, const std::string& qcType) {
 
   if(isTEE(getCurrentLeader())){
     if (qcType == "TEE"){
-      signs = (this->log).getTEEPrepareComb(view,this->qsize); //  Obtain prepare signature from log
+      signs = (this->log).getTEEPrepareComb(view,this->tqsize); //  Obtain prepare signature from log
     }else if (qcType == "Normal"){
       signs = (this->log).getPrepareCombMerged(view,this->qsize); //  Obtain prepare signature from log
     }
     // Signs signs = (this->log).getPrepareComb(view,this->qsize); //  Obtain prepare signature from log
     if (DEBUG1) std::cout << KRED << nfo() << "prepare cert:" << signs.prettyPrint() << KNRM << std::endl;
-    if (signs.getSize() == this->qsize || signs.getSize() == this->tqsize) {
+    if (verifyCombQC(data, signs, PH1_PREPARE)) {
       // Use the data of the prepare message and the collected signatures to build the final message
       MsgPrepareComb finalMsg(data, signs);
       Peers recipients = remove_from_peers_pure(this->myid);
@@ -3166,21 +3363,24 @@ void Handler::decideComb(RData data, const std::string& qcType) {
     } 
   }else{
     if (qcType == "TEE"){
-      signs = (this->log).getTEECommitComb(view,this->qsize); //  Obtain prepare signature from log
+      signs = (this->log).getTEECommitComb(view,this->tqsize); //  Obtain commit signature from log
     }else if (qcType == "Normal"){
       signs = (this->log).getCommitCombMerged(view,this->qsize); //  Obtain prepare signature from log
     }
     // Signs signs = (this->log).getPrepareComb(view,this->qsize); //  Obtain prepare signature from log
     if (DEBUG1) std::cout << KRED << nfo() << "commit cert:" << signs.prettyPrint() << KNRM << std::endl;
-    if (signs.getSize() == this->qsize || signs.getSize() == this->tqsize) {
+    if (verifyCombQC(data, signs, PH1_COMMIT)) {
       // Use the data of the prepare message and the collected signatures to build the final message
       MsgCommitComb finalMsg(data, signs);
       Peers recipients = remove_from_peers_pure(this->myid);
       sendMsgCommitComb(finalMsg, recipients); // Send a prepared message with a qsize signature as a "commit".
     }
   }
-    // Leader execut
+
+  Phase1 finalPhase = isTEE(getCurrentLeader()) ? PH1_PREPARE : PH1_COMMIT;
+  if (verifyCombQC(data, signs, finalPhase)) {
     executeComb(data);
+  }
 }
 
 
@@ -3190,6 +3390,7 @@ void Handler::decideComb(RData data, const std::string& qcType) {
 // For leaders to send prepare certificates to backups at the beginning of the pre-commit phase
 void Handler::preCommitComb(RData data, const std::string& qcType) {
   if (DEBUG1) { std::cout << KMAG << nfo() << "enter pre-commit" << qcType << KNRM << std::endl; }
+  View view = data.getPropv();
   Signs signs;
   if (qcType == "TEE"){
     signs = (this->log).getTEEPrepareComb(view,this->tqsize); //  Obtain prepare signature from log
@@ -3197,13 +3398,14 @@ void Handler::preCommitComb(RData data, const std::string& qcType) {
     signs = (this->log).getPrepareCombMerged(view,this->qsize); //  Obtain prepare signature from log
   }
   // We should not need to check the size of 'signs' as this function should only be called, when this is possible
-  if (signs.getSize() == this->qsize || signs.getSize() == this->tqsize) {
+  if (verifyCombQC(data, signs, PH1_PREPARE)) {
     MsgPrepareComb msgPrep(data,signs);
     Peers recipients = remove_from_peers(this->myid);
     sendMsgPrepareComb(msgPrep,recipients);
 
     // The leader also stores the prepare message
     Just justPc = callTEEstoreComb(Just(data,signs));
+    if (!justPc.isSet()) { return; }
     MsgPreCommitComb msgPc(justPc.getRData(),justPc.getSigns());
 
     // We store our own commit in the log
@@ -3228,27 +3430,32 @@ void Handler::commitComb(RData data, const std::string& qcType) {
     signs = (this->log).getPrecommitCombMerged(view,this->qsize); //  Obtain precommit signature from log
   }
   // We should not need to check the size of 'signs' as this function should only be called, when this is possible
-  if (signs.getSize() == this->qsize || signs.getSize() == this->tqsize) {
+  if (verifyCombQC(data, signs, PH1_PRECOMMIT)) {
     // Use the data of the precommit message and the collected signatures to build the final message
     MsgPreCommitComb finalMsg(data, signs);
     Peers recipients = remove_from_peers(this->myid);
     sendMsgPreCommitComb(finalMsg, recipients); // Send a precommit message with a qsize signature as a "commit".
     // // Leader execute
     // executeComb(data);
+  } else {
+    return;
   }
 
-      // The leader also stores the prepare message
+    // The leader also stores the pre-commit certificate.
     Just justPc = callTEEstoreComb(Just(data,signs));
+    if (!justPc.isSet()) { return; }
     MsgCommitComb msgPc(justPc.getRData(),justPc.getSigns());
 
-    // We store our own commit in the log
-    if (this->qsize <= this->log.storeComComb(msgPc) || this->tqsize <= this->log.storeTEEComComb(msgPc)) {
-      decideComb(justPc.getRData(), "TEE");}
+    // Store the leader's own commit vote in the correct signer class.  The
+    // remaining votes are handled by handleCommitComb.
+    if (isTEE(this->myid)) { this->log.storeTEEComComb(msgPc); }
+    else { this->log.storeComComb(msgPc); }
 }
 
 // For backups to respond to MsgPreCommitComb messages received from leaders
 void Handler::respondToPreCommitComb(MsgPreCommitComb msg) {
   Just justPc = callTEEstoreComb(Just(msg.data,msg.signs));
+  if (!justPc.isSet()) { return; }
   if (DEBUG1) { std::cout << KMAG << nfo() << "TEEstoreComb just:" << justPc.prettyPrint() << KNRM << std::endl; }
   MsgCommitComb msgc(justPc.getRData(),justPc.getSigns());
   Peers recipients = keep_from_peers(getCurrentLeader());
@@ -3264,8 +3471,12 @@ void Handler::handlePreCommitComb(MsgPreCommitComb msg) {
   View v = data.getPropv();
   if (v == this->view) {
     if (amLeaderOf(v)) {
-      unsigned int teecount;
-      unsigned int ncount;
+      if (!verifyCombVote(data, msg.signs, PH1_PRECOMMIT)) {
+        if (DEBUG1) std::cout << KMAG << nfo() << "discarded invalid pre-commit vote" << KNRM << std::endl;
+        return;
+      }
+      unsigned int teecount = 0;
+      unsigned int ncount = 0;
       if (isTEE(msg.signs.get(0).getSigner())){
         if (DEBUGH) std::cout << KRED << nfo() << "handle tee message:" << msg.prettyPrint() << KNRM << std::endl;
         teecount = this->log.storeTEEPcComb(msg);
@@ -3287,11 +3498,19 @@ void Handler::handlePreCommitComb(MsgPreCommitComb msg) {
       }
     } else {
       // Backups wait for a MsgPreCommitComb message from the leader that contains qsize signatures in the decide phase
-      respondToPreCommitComb(msg);
+      if (verifyCombQC(data, msg.signs, PH1_PRECOMMIT)) {
+        respondToPreCommitComb(msg);
+      }
     }
-  } else {
-    if (DEBUG1) std::cout << KMAG << nfo() << "storing:" << msg.prettyPrint() << KNRM << std::endl;
-    if (v > this->view) { log.storePcComb(msg); }
+  } else if (v > this->view) {
+    if (verifyCombQC(data, msg.signs, PH1_PRECOMMIT)) {
+      if (DEBUG1) std::cout << KMAG << nfo() << "storing validated future pre-commit QC:" << msg.prettyPrint() << KNRM << std::endl;
+      this->futurePreCommitQCs[v].insert(msg);
+    } else if (verifyCombVote(data, msg.signs, PH1_PRECOMMIT)) {
+      if (DEBUG1) std::cout << KMAG << nfo() << "storing validated future pre-commit vote:" << msg.prettyPrint() << KNRM << std::endl;
+      if (isTEE(msg.signs.get(0).getSigner())) { log.storeTEEPcComb(msg); }
+      else { log.storePcComb(msg); }
+    }
   }
   auto end = std::chrono::steady_clock::now();
   double time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -3305,7 +3524,9 @@ void Handler::handle_precommitcomb(MsgPreCommitComb msg, const PeerNet::conn_t &
 
 // For backups to respond to MsgPreCommitComb messages received from leaders
 void Handler::respondToCommitComb(MsgCommitComb msg) {
+  if (verifyCombQC(msg.data, msg.signs, PH1_COMMIT)) {
     executeComb(msg.data);
+  }
 }
 
 
@@ -3317,18 +3538,22 @@ void Handler::handleCommitComb(MsgCommitComb msg) {
   View v = data.getPropv();
   if (v == this->view) {
     if (amLeaderOf(v)) {
-      unsigned int teecount;
-      unsigned int ncount;
+      if (!verifyCombVote(data, msg.signs, PH1_COMMIT)) {
+        if (DEBUG1) std::cout << KMAG << nfo() << "discarded invalid commit vote" << KNRM << std::endl;
+        return;
+      }
+      unsigned int teecount = 0;
+      unsigned int ncount = 0;
 
       if (isTEE(msg.signs.get(0).getSigner())){
         if (DEBUGH) std::cout << KRED << nfo() << "handle tee message:" << msg.prettyPrint() << KNRM << std::endl;
         teecount =this->log.storeTEEComComb(msg);
-        if (teecount != 0){ncount = (this->log).getPrecommitComb(v, this->qsize).getSize();}
+        if (teecount != 0){ncount = (this->log).getCommitComb(v, this->qsize).getSize();}
 
       }else{
         if (DEBUGH) std::cout << KRED << nfo() << "handle non-tee message:" << msg.prettyPrint() << KNRM << std::endl;
         ncount = this->log.storeComComb(msg);
-        if (ncount != 0){teecount = (this->log).getTEEPrecommitComb(v, this->tqsize).getSize();}
+        if (ncount != 0){teecount = (this->log).getTEECommitComb(v, this->tqsize).getSize();}
       }
 
       if ((teecount == this->tqsize) && (this->phase == Phase::COMMIT)){
@@ -3342,11 +3567,19 @@ void Handler::handleCommitComb(MsgCommitComb msg) {
       }
     } else {
       // Backups wait for a MsgPreCommitComb message from the leader that contains qsize signatures in the decide phase
-      respondToCommitComb(msg);
+      if (verifyCombQC(data, msg.signs, PH1_COMMIT)) {
+        respondToCommitComb(msg);
+      }
     }
-  } else {
-    if (DEBUG1) std::cout << KMAG << nfo() << "storing:" << msg.prettyPrint() << KNRM << std::endl;
-    if (v > this->view) { log.storeComComb(msg); }
+  } else if (v > this->view) {
+    if (verifyCombQC(data, msg.signs, PH1_COMMIT)) {
+      if (DEBUG1) std::cout << KMAG << nfo() << "storing validated future commit QC:" << msg.prettyPrint() << KNRM << std::endl;
+      this->futureCommitQCs[v].insert(msg);
+    } else if (verifyCombVote(data, msg.signs, PH1_COMMIT)) {
+      if (DEBUG1) std::cout << KMAG << nfo() << "storing validated future commit vote:" << msg.prettyPrint() << KNRM << std::endl;
+      if (isTEE(msg.signs.get(0).getSigner())) { log.storeTEEComComb(msg); }
+      else { log.storeComComb(msg); }
+    }
   }
   auto end = std::chrono::steady_clock::now();
   double time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();

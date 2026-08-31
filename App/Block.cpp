@@ -76,6 +76,10 @@ bool Block::extends(Hash h) {
   return (this->prevHash == h);
 }
 
+unsigned int Block::getId() { return this->id; }
+bool Block::isSet() { return this->set; }
+Hash Block::getPrevHash() { return this->prevHash; }
+
 bool Block::isDummy() { return !this->set; }
 unsigned int Block::getSize() { return this->size; }
 Transaction *Block::getTransactions() { return this->transactions; }

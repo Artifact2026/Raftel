@@ -336,20 +336,50 @@ struct MsgNewViewComb {
   //void serialize(salticidae::DataStream &s) const { s << data << sign; }
 };
 
+struct NewViewProofComb {
+  unsigned int size = 0;
+  RData data[MAX_NUM_SIGNATURES];
+  Sign signs[MAX_NUM_SIGNATURES];
+
+  NewViewProofComb() {}
+  NewViewProofComb(const std::set<MsgNewViewComb> &msgs) {
+    for (std::set<MsgNewViewComb>::const_iterator it = msgs.begin();
+         it != msgs.end() && size < MAX_NUM_SIGNATURES; ++it) {
+      data[size] = it->data;
+      signs[size] = it->sign;
+      ++size;
+    }
+  }
+  void serialize(salticidae::DataStream &s) const {
+    s << size;
+    for (unsigned int i = 0; i < MAX_NUM_SIGNATURES; ++i) {
+      s << data[i] << signs[i];
+    }
+  }
+  void unserialize(salticidae::DataStream &s) {
+    s >> size;
+    for (unsigned int i = 0; i < MAX_NUM_SIGNATURES; ++i) {
+      s >> data[i] >> signs[i];
+    }
+    if (size > MAX_NUM_SIGNATURES) { size = 0; }
+  }
+};
+
 struct MsgLdrPrepareComb {
   static const uint8_t opcode = HDR_PREPARE_LDR_COMB;
   salticidae::DataStream serialized;
   Accum acc;
   Block block;
+  NewViewProofComb proof;
   Sign sign;
-  MsgLdrPrepareComb(const Accum &acc, const Block &block, const Sign &sign) : acc(acc),block(block),sign(sign) { serialized << acc << block << sign; }
-  MsgLdrPrepareComb(salticidae::DataStream &&s) { s >> acc >> block >> sign; }
+  MsgLdrPrepareComb(const Accum &acc, const Block &block, const NewViewProofComb &proof, const Sign &sign) : acc(acc),block(block),proof(proof),sign(sign) { serialized << acc << block << proof << sign; }
+  MsgLdrPrepareComb(salticidae::DataStream &&s) { s >> acc >> block >> proof >> sign; }
   bool operator<(const MsgLdrPrepareComb& s) const {
     if (sign < s.sign) { return true; }
     return false;
   }
   std::string prettyPrint() {
-    return "PREPARE-LDR-COMB[" + acc.prettyPrint() + "," + block.prettyPrint() + "," + sign.prettyPrint() + "]";
+    return "PREPARE-LDR-COMB[" + acc.prettyPrint() + "," + block.prettyPrint() + ",proof=" + std::to_string(proof.size) + "," + sign.prettyPrint() + "]";
   }
   unsigned int sizeMsg() { return (sizeof(Accum) + sizeof(Block) + sizeof(Sign)); }
   //void serialize(salticidae::DataStream &s) const { s << acc << block << sign; }

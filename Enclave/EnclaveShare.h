@@ -8,10 +8,13 @@
 
 #include <string>
 #include <map>
+#include <set>
 
 #include "../App/config.h"
 #include "../App/types.h"
 #include "../App/key.h"
+
+extern std::map<PID, bool> node_is_TEE;
 
 
 std::string nfo();
@@ -19,6 +22,8 @@ sgx_status_t initialize_variables(PID *me, pids_t *others, unsigned int *q, unsi
 
 sign_t signString(std::string text);
 bool verifyText(signs_t signs, std::string text);
+bool verifyQuorum(signs_t signs, std::string text,
+                  unsigned int expectedSize, bool teeOnly);
 bool verifyJust(just_t *just);
 bool verifyAccum(accum_t *acc);
 

@@ -84,7 +84,7 @@ sgx_status_t TEEstore(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, 
 sgx_status_t TEEaccum(sgx_enclave_id_t eid, sgx_status_t* retval, votes_t* vs, accum_t* res);
 sgx_status_t TEEaccumSp(sgx_enclave_id_t eid, sgx_status_t* retval, uvote_t* vote, accum_t* res);
 sgx_status_t COMB_TEEsign(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just);
-sgx_status_t COMB_TEEprepare(sgx_enclave_id_t eid, sgx_status_t* retval, hash_t* hash, accum_t* acc, just_t* res);
+sgx_status_t COMB_TEEprepare(sgx_enclave_id_t eid, sgx_status_t* retval, basicblock_t* block, accum_t* acc, newviews_t* newviews, just_t* res);
 sgx_status_t COMB_TEEstore(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, just_t* res);
 sgx_status_t COMB_TEEaccum(sgx_enclave_id_t eid, sgx_status_t* retval, onejusts_t* js, accum_t* res);
 sgx_status_t COMB_TEEaccumSp(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, accum_t* res);

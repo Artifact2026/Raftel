@@ -2017,8 +2017,9 @@ MsgLdrPrepareComb Log::firstLdrPrepareComb(View view) {
   }
   Accum acc;
   Block block;
+  NewViewProofComb proof;
   Sign sign;
-  MsgLdrPrepareComb msg(acc,block,sign);
+  MsgLdrPrepareComb msg(acc,block,proof,sign);
   return msg;
 }
 

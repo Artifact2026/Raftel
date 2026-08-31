@@ -73,8 +73,9 @@ typedef struct ms_COMB_TEEsign_t {
 
 typedef struct ms_COMB_TEEprepare_t {
 	sgx_status_t ms_retval;
-	hash_t* ms_hash;
+	basicblock_t* ms_block;
 	accum_t* ms_acc;
+	newviews_t* ms_newviews;
 	just_t* ms_res;
 } ms_COMB_TEEprepare_t;
 
@@ -817,19 +818,23 @@ static sgx_status_t SGX_CDECL sgx_COMB_TEEprepare(void* pms)
 		return SGX_ERROR_UNEXPECTED;
 	}
 	sgx_status_t status = SGX_SUCCESS;
-	hash_t* _tmp_hash = __in_ms.ms_hash;
-	size_t _len_hash = sizeof(hash_t);
-	hash_t* _in_hash = NULL;
+	basicblock_t* _tmp_block = __in_ms.ms_block;
+	size_t _len_block = sizeof(basicblock_t);
+	basicblock_t* _in_block = NULL;
 	accum_t* _tmp_acc = __in_ms.ms_acc;
 	size_t _len_acc = sizeof(accum_t);
 	accum_t* _in_acc = NULL;
+	newviews_t* _tmp_newviews = __in_ms.ms_newviews;
+	size_t _len_newviews = sizeof(newviews_t);
+	newviews_t* _in_newviews = NULL;
 	just_t* _tmp_res = __in_ms.ms_res;
 	size_t _len_res = sizeof(just_t);
 	just_t* _in_res = NULL;
 	sgx_status_t _in_retval;
 
-	CHECK_UNIQUE_POINTER(_tmp_hash, _len_hash);
+	CHECK_UNIQUE_POINTER(_tmp_block, _len_block);
 	CHECK_UNIQUE_POINTER(_tmp_acc, _len_acc);
+	CHECK_UNIQUE_POINTER(_tmp_newviews, _len_newviews);
 	CHECK_UNIQUE_POINTER(_tmp_res, _len_res);
 
 	//
@@ -837,14 +842,14 @@ static sgx_status_t SGX_CDECL sgx_COMB_TEEprepare(void* pms)
 	//
 	sgx_lfence();
 
-	if (_tmp_hash != NULL && _len_hash != 0) {
-		_in_hash = (hash_t*)malloc(_len_hash);
-		if (_in_hash == NULL) {
+	if (_tmp_block != NULL && _len_block != 0) {
+		_in_block = (basicblock_t*)malloc(_len_block);
+		if (_in_block == NULL) {
 			status = SGX_ERROR_OUT_OF_MEMORY;
 			goto err;
 		}
 
-		if (memcpy_s(_in_hash, _len_hash, _tmp_hash, _len_hash)) {
+		if (memcpy_s(_in_block, _len_block, _tmp_block, _len_block)) {
 			status = SGX_ERROR_UNEXPECTED;
 			goto err;
 		}
@@ -863,6 +868,19 @@ static sgx_status_t SGX_CDECL sgx_COMB_TEEprepare(void* pms)
 		}
 
 	}
+	if (_tmp_newviews != NULL && _len_newviews != 0) {
+		_in_newviews = (newviews_t*)malloc(_len_newviews);
+		if (_in_newviews == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		if (memcpy_s(_in_newviews, _len_newviews, _tmp_newviews, _len_newviews)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+
+	}
 	if (_tmp_res != NULL && _len_res != 0) {
 		if ((_in_res = (just_t*)malloc(_len_res)) == NULL) {
 			status = SGX_ERROR_OUT_OF_MEMORY;
@@ -871,7 +889,7 @@ static sgx_status_t SGX_CDECL sgx_COMB_TEEprepare(void* pms)
 
 		memset((void*)_in_res, 0, _len_res);
 	}
-	_in_retval = COMB_TEEprepare(_in_hash, _in_acc, _in_res);
+	_in_retval = COMB_TEEprepare(_in_block, _in_acc, _in_newviews, _in_res);
 	if (memcpy_verw_s(&ms->ms_retval, sizeof(ms->ms_retval), &_in_retval, sizeof(_in_retval))) {
 		status = SGX_ERROR_UNEXPECTED;
 		goto err;
@@ -884,8 +902,9 @@ static sgx_status_t SGX_CDECL sgx_COMB_TEEprepare(void* pms)
 	}
 
 err:
-	if (_in_hash) free(_in_hash);
+	if (_in_block) free(_in_block);
 	if (_in_acc) free(_in_acc);
+	if (_in_newviews) free(_in_newviews);
 	if (_in_res) free(_in_res);
 	return status;
 }

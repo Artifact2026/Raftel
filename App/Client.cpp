@@ -57,7 +57,7 @@ std::unique_ptr<MsgNet> net;          // network
 std::map<PID,MsgNet::conn_t> conns;   // connections to the replicas
 std::thread send_thread;              // thread to send messages
 unsigned int qsize = 0;
-unsigned int tqsize = 0;
+unsigned int replyQuorum = 0;      // client completion threshold, not consensus QT
 unsigned int numNodes = 0;
 unsigned int numFaults = 1;
 unsigned int constFactor = 3;         // default value: by default, there are 3f+1 nodes
@@ -84,16 +84,6 @@ unsigned int inst = 0; // instance number when repeating experiments
 std::string statsThroughputLatency;
 std::string statsEndToEnd;
 std::string debugThroughputLatency;
-
-
-// In the chained versions, as we start with node 1 as the leader, we also send the first transaction to 1
-#if defined(CHAINED_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE_DEBUG)
-bool skipFirst = true;
-#else
-bool skipFirst = false;
-#endif
-
-
 
 std::string cnfo() {
   return ("[C" + std::to_string(cid) + "]");
@@ -255,8 +245,8 @@ void handle_reply(MsgReply &&msg, const MsgNet::conn_t &conn) {
                 << KNRM << std::endl;
     }
     unsigned int numReplies = updTransaction(tid);
-    if (DEBUGC) { std::cout << cnfo() << "received " << numReplies << "/" << tqsize << " replies for transaction " << tid << KNRM << std::endl; }
-    if (numReplies == tqsize) {
+    if (DEBUGC) { std::cout << cnfo() << "received " << numReplies << "/" << replyQuorum << " replies for transaction " << tid << KNRM << std::endl; }
+    if (numReplies == replyQuorum) {
       std::map<TID,TransInfo>::iterator it = transactions.find(tid);
       if (it != transactions.end()) {
         Transaction tx = std::get<2>(it->second);
@@ -335,14 +325,13 @@ void send_one_trans(MsgTransaction msg, MsgNet::conn_t conn) {
 }
 
 unsigned int send_transactions_to_all(TID transid) {
+  MsgTransaction msg = mkTransaction(transid);
   for (auto &p: conns) {
     if (DEBUGC) { std::cout << cnfo() << "sending transaction(" << transid << ") to " << p.first << KNRM << std::endl; }
-    MsgTransaction msg = mkTransaction(transid);
     net->send_msg(msg, p.second);
     //std::thread thSend(send_one_trans,msg,p.second);
-    transid++;
   }
-  return transid;
+  return transid + 1;
 }
 
 
@@ -361,49 +350,19 @@ void send_transactions() {
   // The transaction id '0' is reserved for dummy transactions
   unsigned int transid = 1;
   beginning = std::chrono::steady_clock::now();
-  
-  // Find connection to leader (node 0)
-  // auto leader_conn = conns.find(0);
-  // if (leader_conn == conns.end()) {
-  //   std::cout << KLRED << cnfo() << "ERROR: Could not find connection to leader (node 0)" << KNRM << std::endl;
-  //   return;
-  // }
-  
-  // Modified code: send to all nodes with id < totaltee
+
+  // Build each transaction once and disseminate the same request to every
+  // replica.  Leadership rotates across all replicas, so restricting client
+  // requests to TEE replicas can leave the current leader without the request.
   while (transid <= numInstances) {
+    MsgTransaction msg = mkTransaction(transid);
     for (auto &p: conns) {
-      if (skipFirst) { skipFirst = false; }
-      else {
-        // Only send to nodes with id < totaltee
-        if (totaltee == 0 || p.first < totaltee) {
-          if (DEBUGC) { std::cout << cnfo() << "sending transaction(" << transid << ") to node " << p.first << " (id < " << totaltee << ")" << KNRM << std::endl; }
-          MsgTransaction msg = mkTransaction(transid);
-          net->send_msg(msg, p.second);
-          //std::thread thSend(send_one_trans,msg,p.second);
-          usleep(sleepTime);
-          if (DEBUGC) { std::cout << cnfo() << "slept for " << sleepTime << "; transid=" << transid << KNRM << std::endl; }
-          transid++;
-          if (transid > numInstances) { goto done; }
-        }
-      }
+      if (DEBUGC) { std::cout << cnfo() << "broadcasting transaction(" << transid << ") to node " << p.first << KNRM << std::endl; }
+      net->send_msg(msg, p.second);
     }
+    transid++;
+    usleep(sleepTime);
   }
-done:
-return;
-  
-  // Modified code: send only to leader (node 0)
-  // while (transid <= numInstances) {
-  //   if (skipFirst) { 
-  //     skipFirst = false; 
-  //   } else {
-  //     if (DEBUGC) { std::cout << cnfo() << "sending transaction(" << transid << ") to leader (node 0)" << KNRM << std::endl; }
-  //     MsgTransaction msg = mkTransaction(transid);
-  //     net->send_msg(msg, leader_conn->second);
-  //     usleep(sleepTime);
-  //     if (DEBUGC) { std::cout << cnfo() << "slept for " << sleepTime << "; transid=" << transid << KNRM << std::endl; }
-  //     transid++;
-  //   }
-  // }
 }
 
 
@@ -460,7 +419,7 @@ int main(int argc, char const *argv[]) {
 
   numNodes = (constFactor*numFaults)+1;
   qsize = numNodes-numFaults;
-  tqsize = numFaults+1;
+  replyQuorum = numFaults+1;
   std::string confFile = "config";
   Nodes nodes(confFile,numNodes);
   //numInstancesPerNode = numInstances / numNodes;

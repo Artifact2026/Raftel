@@ -4,9 +4,71 @@
 
 hash_t COMBpreph = newHash(); // hash of the last prepared block
 View   COMBprepv = 0;             // preph's view
-View   COMBview  = 0;             // current view
+hash_t COMBlockh = newHash(); // hash of the latest locked block
+View   COMBlockv = 0;         // lockh's view
+View   COMBview  = 1;             // view 0 is reserved for the genesis block
 Phase1 COMBphase = PH1_NEWVIEW;   // current phase
 
+std::string COMB_transaction2string(const trans_t &transaction) {
+  std::string text = std::to_string(transaction.clientid)
+                   + std::to_string(transaction.transid);
+  text.append(reinterpret_cast<const char *>(transaction.data), PAYLOAD_SIZE);
+  return text;
+}
+
+hash_t COMB_hashBlock(const basicblock_t *block) {
+  hash_t result = noHash();
+  if (!block->set || block->size > MAX_NUM_TRANSACTIONS) {
+    return result;
+  }
+  std::string text = std::to_string(block->id)
+                   + std::to_string(block->set)
+                   + hash2string(block->prev_hash)
+                   + std::to_string(block->size);
+  for (unsigned int i = 0; i < block->size; ++i) {
+    text += COMB_transaction2string(block->trans[i]);
+  }
+  result.set = true;
+  if (!SHA256(reinterpret_cast<const unsigned char *>(text.data()), text.size(), result.hash)) {
+    return noHash();
+  }
+  return result;
+}
+
+bool COMB_validateNewViews(const newviews_t *newviews, accum_t *acc) {
+  if (newviews->size == 0 || newviews->size > MAX_NUM_SIGNATURES
+      || (newviews->size != getQsize() && newviews->size != getTQsize())) {
+    return false;
+  }
+  bool allTEE = true;
+  std::set<PID> signers;
+  View highest = 0;
+  hash_t highestHash = newHash();
+  for (unsigned int i = 0; i < newviews->size; ++i) {
+    onejust_t entry = newviews->justs[i];
+    signs_t one;
+    one.size = 1;
+    one.signs[0] = entry.sign;
+    std::map<PID, bool>::const_iterator type = node_is_TEE.find(entry.sign.signer);
+    if (!entry.set || type == node_is_TEE.end()
+        || !signers.insert(entry.sign.signer).second
+        || entry.rdata.phase != PH1_NEWVIEW
+        || entry.rdata.propv != COMBview
+        || !verifyText(one, rdata2string(entry.rdata))) {
+      return false;
+    }
+    allTEE = allTEE && type->second;
+    if (entry.rdata.justv >= highest) {
+      highest = entry.rdata.justv;
+      highestHash = entry.rdata.justh;
+    }
+  }
+  bool validType = newviews->size == getQsize()
+                || (newviews->size == getTQsize() && allTEE);
+  return validType && acc->set && acc->view == COMBview
+      && acc->size == newviews->size && acc->prepv == highest
+      && eqHashes(acc->hash, highestHash) && verifyAccum(acc);
+}
 
 
 // increments the (view,phase) pair
@@ -46,16 +108,22 @@ sgx_status_t COMB_TEEsign(just_t *just) {
   return status;
 }
 
-sgx_status_t COMB_TEEprepare(hash_t *hash, accum_t *acc, just_t *res) {
+sgx_status_t COMB_TEEprepare(basicblock_t *block, accum_t *acc, newviews_t *newviews, just_t *res) {
   //ocall_print("TEEprepare...");
   sgx_status_t status = SGX_SUCCESS;
 
   //if (DEBUG0) { ocall_print((nfo() + "COMB_TEEprepare hash:" + hash->toString()).c_str()); }
 
-  if (verifyAccum(acc)
-      && COMBview == acc->view
-      && (acc->size == getTQsize() || acc->size == getQsize())) {
-    *res = COMB_sign(*hash,acc->hash,acc->prepv);
+  hash_t hash = COMB_hashBlock(block);
+  bool safeParent = eqHashes(block->prev_hash, acc->hash)
+                 && (eqHashes(block->prev_hash, COMBlockh) || acc->prepv > COMBlockv);
+  if (hash.set && COMB_validateNewViews(newviews, acc) && safeParent) {
+    std::map<PID, bool>::const_iterator leaderType = node_is_TEE.find(acc->sign.signer);
+    if (leaderType != node_is_TEE.end() && leaderType->second) {
+      COMBpreph = hash;
+      COMBprepv = COMBview;
+    }
+    *res = COMB_sign(hash,acc->hash,acc->prepv);
   } else { res->set = false; }
   return status;
 }
@@ -68,15 +136,21 @@ sgx_status_t COMB_TEEstore(just_t *just, just_t *res) {
   hash_t  h  = rd.proph;
   View    v  = rd.propv;
   Phase1  ph = rd.phase;
-  if ((just->signs.size == getTQsize()||just->signs.size == getQsize())
-      && verifyJust(just)
+  bool validQC = (just->signs.size == getTQsize()
+                  && verifyQuorum(just->signs, rdata2string(rd), getTQsize(), true))
+              || (just->signs.size == getQsize()
+                  && verifyQuorum(just->signs, rdata2string(rd), getQsize(), false));
+  if (validQC
       && (COMBview == v)
       && (ph == PH1_PREPARE || ph == PH1_PRECOMMIT)) {
         COMBpreph=h; COMBprepv=v;
+        if (ph == PH1_PRECOMMIT) {
+          COMBlockh=h; COMBlockv=v;
+        }
         *res = COMB_sign(h,newHash(),0);
       } else { 
         if (!(just->signs.size == getTQsize()||just->signs.size == getQsize())) { ocall_print("fail: qcsize"); }
-        if (!(verifyJust(just))) { ocall_print("fail: verifyJust"); }
+        if (!validQC) { ocall_print("fail: verifyJust/quorum"); }
         if (!(COMBview == v)) { ocall_print("fail: view mismatch"); }
         if (!(ph == PH1_PREPARE || ph == PH1_PRECOMMIT)) { ocall_print("fail: phase invalid"); }
         res->set=false; }

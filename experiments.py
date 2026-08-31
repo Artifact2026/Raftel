@@ -1394,7 +1394,9 @@ def clearStatsDir():
 # End of clearStatsDir
 
 
-def mkParams(protocol,constFactor,numFaults,numTrans,payloadSize):
+def mkParams(protocol,constFactor,numFaults,numTrans,payloadSize,totaltee=None):
+    if totaltee is None:
+        totaltee = totalTEE
     f = open(params, 'w')
     f.write("#ifndef PARAMS_H\n")
     f.write("#define PARAMS_H\n")
@@ -1402,7 +1404,9 @@ def mkParams(protocol,constFactor,numFaults,numTrans,payloadSize):
     f.write("#define " + protocol.value + "\n")
     f.write("#define MAX_NUM_NODES " + str((constFactor*numFaults)+1) + "\n")
     f.write("#define MAX_NUM_SIGNATURES " + str((constFactor*numFaults)+1-numFaults) + "\n")
-    f.write("#define MAX_NUM_TEE_SIGNATURES " + str(numFaults+1) + "\n")
+    # Same formula as Handler::tqsize: max(floor(m/2)+1, f+1).
+    tqsize = max((totaltee // 2) + 1, numFaults + 1)
+    f.write("#define MAX_NUM_TEE_SIGNATURES " + str(tqsize) + "\n")
     f.write("#define MAX_NUM_TRANSACTIONS " + str(numTrans) + "\n")
     f.write("#define PAYLOAD_SIZE " +str(payloadSize) + "\n")
     f.write("#define PERSISTENT_COUNTER_TIME " +str(0) + "\n")
@@ -1412,13 +1416,13 @@ def mkParams(protocol,constFactor,numFaults,numTrans,payloadSize):
 # End of mkParams
 
 
-def mkApp(protocol,constFactor,numFaults,numTrans,payloadSize):
+def mkApp(protocol,constFactor,numFaults,numTrans,payloadSize,totaltee=None):
     ncores = 1
     if useMultiCores:
         ncores = numMakeCores
     print(">> making using",str(ncores),"core(s)")
 
-    mkParams(protocol,constFactor,numFaults,numTrans,payloadSize)
+    mkParams(protocol,constFactor,numFaults,numTrans,payloadSize,totaltee)
 
     if runDocker:
         # make 1 instance: the "x" instance
@@ -1867,7 +1871,7 @@ def computeAvgStats(recompile,protocol,constFactor,numClTrans,sleepTime,numViews
 
     # building App with correct parameters
     if recompile:
-        mkApp(protocol,constFactor,numFaults,numTrans,payloadSize)
+        mkApp(protocol,constFactor,numFaults,numTrans,payloadSize,totaltee)
 
     goodValues = 0
 
@@ -2557,7 +2561,7 @@ def oneTVL(protocol,constFactor,numFaults,numTransPerBlock,payloadSize,numClTran
         actualReps = numReps - numDeadNodes if deadNodes else numReps
         totaltee = actualReps
 
-    mkApp(protocol,constFactor,numFaults,numTransPerBlock,payloadSize)
+    mkApp(protocol,constFactor,numFaults,numTransPerBlock,payloadSize,totaltee)
     for sleepTime in sleepTimes:
         clearStatsDir()
         for i in range(repeats):

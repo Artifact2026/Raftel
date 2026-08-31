@@ -49,6 +49,11 @@ def num_replicas(factor: int, faults: int) -> int:
     return factor * faults + 1
 
 
+def tee_quorum_size(totaltee: int, faults: int) -> int:
+    """Return QT using the same formula as Handler::tqsize."""
+    return max((totaltee // 2) + 1, faults + 1)
+
+
 # --- run.py CLI flags vs experiments.py (for comparable experiments) ---
 # experiments.py uses --p1..--p8; run.py uses different numbering. Rough mapping:
 #   run --p0 HybridTEE          ~ experiments --p4 (COMB / BASIC_HYBRID_TEE)
@@ -1341,9 +1346,11 @@ def genLocalConf(n, filename, totaltee, *, all_is_tee_in_config=False):
 
 
 #make instance
-def makeInstance(protocol, debug, batchsize, payload, faults, pct):
+def makeInstance(protocol, debug, batchsize, payload, faults, totaltee, pct):
 
-    pro_dir = str(exen / f"{protocol}_{faults}_{payload}_{batchsize}_{pct}")
+    # MAX_NUM_TEE_SIGNATURES depends on totaltee, so binaries compiled for
+    # different TEE populations must not share the same cache directory.
+    pro_dir = str(exen / f"{protocol}_{faults}_{totaltee}_{payload}_{batchsize}_{pct}")
 
     factor = protocol_factor(protocol)
     branch = protocol_git_branch(protocol)
@@ -1361,8 +1368,8 @@ def makeInstance(protocol, debug, batchsize, payload, faults, pct):
     print(f"Stop checkout error:\n{error}")
 
     # make params
-    print(f"mkprotocol: {protocol}, factor:{factor}, batchsize: {batchsize}, payload: {payload}, teetotal: {faults}, pct: {pct}")
-    mkParams(protocol,debug,factor,faults,batchsize,payload,pct)
+    print(f"mkprotocol: {protocol}, factor:{factor}, batchsize: {batchsize}, payload: {payload}, teetotal: {totaltee}, pct: {pct}")
+    mkParams(protocol,debug,factor,faults,totaltee,batchsize,payload,pct)
 
     folder_path = pro_dir
     if not os.path.exists(folder_path):
@@ -1410,7 +1417,7 @@ def makeInstance(protocol, debug, batchsize, payload, faults, pct):
 #end of makeInstance
 
 # make params
-def mkParams(protocol,debug,constFactor,numFaults,numTrans,payloadSize,pct):
+def mkParams(protocol,debug,constFactor,numFaults,totaltee,numTrans,payloadSize,pct):
     f = open(params, 'w')
     f.write("#ifndef PARAMS_H\n")
     f.write("#define PARAMS_H\n")
@@ -1440,7 +1447,9 @@ def mkParams(protocol,debug,constFactor,numFaults,numTrans,payloadSize,pct):
     # else:
     #     f.write("#define MAX_NUM_SIGNATURES " + str((constFactor*numFaults)+1-numFaults) + "\n")
     f.write("#define MAX_NUM_SIGNATURES " + str((constFactor*numFaults)+1-numFaults) + "\n")
-    f.write("#define MAX_NUM_TEE_SIGNATURES " + str(numFaults+1) + "\n")
+    # Keep the compile-time TEE-signature capacity consistent with the
+    # runtime Handler threshold: tqsize = max(floor(m/2)+1, f+1).
+    f.write("#define MAX_NUM_TEE_SIGNATURES " + str(tee_quorum_size(totaltee, numFaults)) + "\n")
     f.write("#define MAX_NUM_TRANSACTIONS " + str(numTrans) + "\n")
     f.write("#define PAYLOAD_SIZE " +str(payloadSize) + "\n")
     f.write("#define PERSISTENT_COUNTER_TIME " +str(pct) + "\n")
@@ -2659,11 +2668,14 @@ def main():
 
     factor = protocol_factor(Protocol)
     totalnodes = num_replicas(factor, args.faults)
+    if args.totaltee < 0 or args.totaltee > totalnodes:
+        parser.error(f"--totaltee must be between 0 and the replica count ({totalnodes})")
+    build_totaltee = totalnodes if args.local and args.config_all_tee else args.totaltee
     # Local mode always regenerates `config` via genLocalConf(...), so skip mkConfig here.
     # This avoids an intermediate config written with mkConfig's instance-rounding policy.
     if not args.local:
         mkConfig(totalnodes, args.totaltee)
-    makeInstance(Protocol, args.debug, args.batchsize, args.payload, args.faults, args.pct)
+    makeInstance(Protocol, args.debug, args.batchsize, args.payload, args.faults, build_totaltee, args.pct)
 
     if args.local:
         if getattr(args, "fault_local", False):
@@ -2757,4 +2769,3 @@ def main():
 if __name__ == "__main__":
     
     main()
-

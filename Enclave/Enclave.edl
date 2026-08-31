@@ -24,7 +24,7 @@ enclave {
 
         /* Cheap&Quick */
         public sgx_status_t COMB_TEEsign([out] just_t *just);
-        public sgx_status_t COMB_TEEprepare([in] hash_t *hash, [in] accum_t *acc, [out] just_t *res);
+        public sgx_status_t COMB_TEEprepare([in] basicblock_t *block, [in] accum_t *acc, [in] newviews_t *newviews, [out] just_t *res);
         public sgx_status_t COMB_TEEstore([in] just_t *just, [out] just_t *res);
         public sgx_status_t COMB_TEEaccum([in] onejusts_t *js, [out] accum_t *res);
         public sgx_status_t COMB_TEEaccumSp([in] just_t *just, [out] accum_t *res);

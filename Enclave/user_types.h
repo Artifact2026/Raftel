@@ -200,6 +200,21 @@ typedef struct _trans_t
   unsigned char data[PAYLOAD_SIZE];
 } trans_t;
 
+typedef struct _basicblock_t
+{
+  unsigned int id;
+  bool set;
+  hash_t prev_hash;
+  unsigned int size;
+  trans_t trans[MAX_NUM_TRANSACTIONS];
+} basicblock_t;
+
+typedef struct _newviews_t
+{
+  unsigned int size;
+  onejust_t justs[MAX_NUM_SIGNATURES];
+} newviews_t;
+
 typedef struct _jblock_t
 {
   bool set;

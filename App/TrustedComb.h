@@ -5,6 +5,7 @@
 #include "Hash.h"
 #include "Just.h"
 #include "Accum.h"
+#include "Block.h"
 #include "../Enclave/user_types.h"
 
 
@@ -13,6 +14,8 @@ class TrustedComb {
  private:
   Hash   preph;          // hash of the last prepared block
   View   prepv;          // preph's view
+  Hash   lockh;          // hash of the latest locked block
+  View   lockv;          // lockh's view
   View   view;           // current view
   Phase1 phase;          // current phase
   PID    id;             // unique identifier
@@ -28,7 +31,7 @@ class TrustedComb {
   TrustedComb(unsigned int id, KEY priv, unsigned int q, unsigned int tq);
 
   Just TEEsign();
-  Just TEEprepare(Stats &stats, Nodes nodes, Hash hash, Accum acc);
+  Just TEEprepare(Stats &stats, Nodes nodes, Block block, Accum acc, newviews_t proof);
   Just TEEstore(Stats &stats, Nodes nodes, Just just);
   Accum TEEaccum(Stats &stats, Nodes nodes, Just justs[MAX_NUM_SIGNATURES]);
   Accum TEEaccumSp(Stats &stats, Nodes nodes, just_t just);

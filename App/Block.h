@@ -29,6 +29,9 @@ class Block {
 
   bool extends(Hash h);
   Hash hash();
+  unsigned int getId();
+  bool isSet();
+  Hash getPrevHash();
 
   bool isDummy(); // true if the block is not set
   unsigned int getSize();

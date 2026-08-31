@@ -47,8 +47,9 @@ typedef struct ms_COMB_TEEsign_t {
 
 typedef struct ms_COMB_TEEprepare_t {
 	sgx_status_t ms_retval;
-	hash_t* ms_hash;
+	basicblock_t* ms_block;
 	accum_t* ms_acc;
+	newviews_t* ms_newviews;
 	just_t* ms_res;
 } ms_COMB_TEEprepare_t;
 
@@ -467,12 +468,13 @@ sgx_status_t COMB_TEEsign(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* ju
 	return status;
 }
 
-sgx_status_t COMB_TEEprepare(sgx_enclave_id_t eid, sgx_status_t* retval, hash_t* hash, accum_t* acc, just_t* res)
+sgx_status_t COMB_TEEprepare(sgx_enclave_id_t eid, sgx_status_t* retval, basicblock_t* block, accum_t* acc, newviews_t* newviews, just_t* res)
 {
 	sgx_status_t status;
 	ms_COMB_TEEprepare_t ms;
-	ms.ms_hash = hash;
+	ms.ms_block = block;
 	ms.ms_acc = acc;
+	ms.ms_newviews = newviews;
 	ms.ms_res = res;
 	status = sgx_ecall(eid, 7, &ocall_table_Enclave, &ms);
 	if (status == SGX_SUCCESS && retval) *retval = ms.ms_retval;

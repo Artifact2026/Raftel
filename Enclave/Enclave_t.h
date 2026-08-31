@@ -26,7 +26,7 @@ sgx_status_t TEEstore(just_t* just, just_t* res);
 sgx_status_t TEEaccum(votes_t* vs, accum_t* res);
 sgx_status_t TEEaccumSp(uvote_t* vote, accum_t* res);
 sgx_status_t COMB_TEEsign(just_t* just);
-sgx_status_t COMB_TEEprepare(hash_t* hash, accum_t* acc, just_t* res);
+sgx_status_t COMB_TEEprepare(basicblock_t* block, accum_t* acc, newviews_t* newviews, just_t* res);
 sgx_status_t COMB_TEEstore(just_t* just, just_t* res);
 sgx_status_t COMB_TEEaccum(onejusts_t* js, accum_t* res);
 sgx_status_t COMB_TEEaccumSp(just_t* just, accum_t* res);

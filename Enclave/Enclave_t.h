@@ -30,6 +30,11 @@ sgx_status_t COMB_TEEprepare(basicblock_t* block, accum_t* acc, newviews_t* newv
 sgx_status_t COMB_TEEstore(just_t* just, just_t* res);
 sgx_status_t COMB_TEEaccum(onejusts_t* js, accum_t* res);
 sgx_status_t COMB_TEEaccumSp(just_t* just, accum_t* res);
+sgx_status_t DAMYSUS_TEEsign(just_t* just);
+sgx_status_t DAMYSUS_TEEprepare(hash_t* hash, accum_t* acc, just_t* res);
+sgx_status_t DAMYSUS_TEEstore(just_t* just, just_t* res);
+sgx_status_t DAMYSUS_TEEaccum(onejusts_t* js, accum_t* res);
+sgx_status_t DAMYSUS_TEEaccumSp(just_t* just, accum_t* res);
 sgx_status_t FREE_TEEauth(payload_t* text, auth_t* res);
 sgx_status_t FREE_TEEverify(payload_t* text, auths_t* a, bool* res);
 sgx_status_t FREE_TEEverify2(payload_t* text1, auths_t* a1, payload_t* text2, auths_t* a2, bool* res);

@@ -25,7 +25,7 @@
 
 // ------------------------------------
 // SGX related stuff
-#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE)
+#if defined(BASIC_HYBRID_TEE) || defined(CHAINED_HYBRID_TEE) || defined(BASIC_DAMYSUS)
 //
 #include "Enclave_u.h"
 #include "sgx_urts.h"
@@ -40,7 +40,7 @@
 #include "TrustedChComb.h"
 //
 #else
-#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_HYBRID_TEE, BASIC_HYBRID_TEE_DEBUG, CHAINED_HYBRID_TEE_DEBUG, BASIC_HOTSTUFF."
+#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_HYBRID_TEE, BASIC_HYBRID_TEE_DEBUG, CHAINED_HYBRID_TEE_DEBUG, BASIC_HOTSTUFF, BASIC_DAMYSUS."
 #endif
 // ------------------------------------
 
@@ -313,6 +313,11 @@ class Handler {
   void handle_ldrprepare(MsgLdrPrepare msg, const PeerNet::conn_t &conn);
   void handle_precommit(MsgPreCommit msg, const PeerNet::conn_t &conn);
   void handle_commit(MsgCommit msg, const PeerNet::conn_t &conn);
+  void handle_newview_damysus(MsgNewViewDamysus msg, const PeerNet::conn_t &conn);
+  void handle_ldrprepare_damysus(MsgLdrPrepareDamysus msg, const PeerNet::conn_t &conn);
+  void handle_prepare_damysus(MsgPrepareDamysus msg, const PeerNet::conn_t &conn);
+  void handle_precommit_damysus(MsgPreCommitDamysus msg, const PeerNet::conn_t &conn);
+  void handle_commit_damysus(MsgCommitDamysus msg, const PeerNet::conn_t &conn);
   void handle_transaction(MsgTransaction msg, const ClientNet::conn_t &conn);
   void handle_start(MsgStart msg, const ClientNet::conn_t &conn);
   //void handle_stop(MsgStop msg, const ClientNet::conn_t &conn);

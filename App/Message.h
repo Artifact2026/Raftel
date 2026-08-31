@@ -440,6 +440,49 @@ struct MsgCommitComb {
   void serialize(salticidae::DataStream &s) const { s << data << signs; }
 };
 
+// Basic Damysus uses the original Cheap&Quick wire format.  In particular,
+// the leader proposal contains only (accumulator, block, signature); the
+// hybrid-only new-view proof is deliberately not serialized here.
+struct MsgNewViewDamysus {
+  static const uint8_t opcode = HDR_NEWVIEW_DAMYSUS;
+  salticidae::DataStream serialized;
+  RData data; Sign sign;
+  MsgNewViewDamysus(const RData &d, const Sign &s): data(d), sign(s) { serialized << data << sign; }
+  MsgNewViewDamysus(salticidae::DataStream &&s) { s >> data >> sign; }
+};
+
+struct MsgLdrPrepareDamysus {
+  static const uint8_t opcode = HDR_PREPARE_LDR_DAMYSUS;
+  salticidae::DataStream serialized;
+  Accum acc; Block block; Sign sign;
+  MsgLdrPrepareDamysus(const Accum &a, const Block &b, const Sign &s): acc(a), block(b), sign(s) { serialized << acc << block << sign; }
+  MsgLdrPrepareDamysus(salticidae::DataStream &&s) { s >> acc >> block >> sign; }
+};
+
+struct MsgPrepareDamysus {
+  static const uint8_t opcode = HDR_PREPARE_DAMYSUS;
+  salticidae::DataStream serialized;
+  RData data; Signs signs;
+  MsgPrepareDamysus(const RData &d, const Signs &s): data(d), signs(s) { serialized << data << signs; }
+  MsgPrepareDamysus(salticidae::DataStream &&s) { s >> data >> signs; }
+};
+
+struct MsgPreCommitDamysus {
+  static const uint8_t opcode = HDR_PRECOMMIT_DAMYSUS;
+  salticidae::DataStream serialized;
+  RData data; Signs signs;
+  MsgPreCommitDamysus(const RData &d, const Signs &s): data(d), signs(s) { serialized << data << signs; }
+  MsgPreCommitDamysus(salticidae::DataStream &&s) { s >> data >> signs; }
+};
+
+struct MsgCommitDamysus {
+  static const uint8_t opcode = HDR_COMMIT_DAMYSUS;
+  salticidae::DataStream serialized;
+  RData data; Signs signs;
+  MsgCommitDamysus(const RData &d, const Signs &s): data(d), signs(s) { serialized << data << signs; }
+  MsgCommitDamysus(salticidae::DataStream &&s) { s >> data >> signs; }
+};
+
 
 
 /////////////////////////////////////////////////////

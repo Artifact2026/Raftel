@@ -30,6 +30,7 @@ _PROTOCOL_CHECKOUT = {
     "Damysus": (2, "Damysus"),
     "Oneshot": (2, "oneshot"),
     "Hotstuff": (3, "main"),
+    "Basic-Damysus": (2, "main"),
 }
 
 
@@ -63,6 +64,7 @@ def tee_quorum_size(totaltee: int, faults: int) -> int:
 #   run --p3 Damysus           ~ experiments --p6 chained COMB (CHAINED_HYBRID_TEE)
 #   run --p4 Oneshot           ~ experiments --p8 (ONEP / BASIC_ONEP)
 #   run --p5 Hotstuff          ~ experiments --p1 (BASE / BASIC_HOTSTUFF)
+#   run --p6 Basic-Damysus     ~ upstream BASIC_CHEAP_AND_QUICK / BASIC_DAMYSUS
 # Local defaults aligned with experiments.py: numViews=10, numClTrans=1, config isTEE:1 for all nodes.
 
 
@@ -1440,6 +1442,8 @@ def mkParams(protocol,debug,constFactor,numFaults,totaltee,numTrans,payloadSize,
         f.write("#define BASIC_ONEP\n")
     elif protocol == "Hotstuff":
         f.write("#define BASIC_HOTSTUFF\n")
+    elif protocol == "Basic-Damysus":
+        f.write("#define BASIC_DAMYSUS\n")
     f.write("#define MAX_NUM_NODES " + str((constFactor*numFaults)+1) + "\n")
 
     # if protocol == "Chained-HybridTEE":
@@ -2569,6 +2573,7 @@ def main():
     parser.add_argument("--p3",        action="store_true",    help="run Damysus")
     parser.add_argument("--p4",        action="store_true",    help="run Oneshot")
     parser.add_argument("--p5",        action="store_true",    help="run hotstuff")
+    parser.add_argument("--p6",        action="store_true",    help="run basic Damysus")
     parser.add_argument("--debug",     action="store_true",    help="non_TEE")
     parser.add_argument("--local",     action="store_true",    help="run locally")
     parser.add_argument('--batchsize', type=int,  default=400, help='MAX_NUM_TRANSACTIONS in params (compile-time batch capacity)')
@@ -2660,6 +2665,8 @@ def main():
         Protocol = "Oneshot"
     elif args.p5:
         Protocol = "Hotstuff"
+    elif args.p6:
+        Protocol = "Basic-Damysus"
     else:
         Protocol = "HybridTEE"
 
@@ -2668,6 +2675,11 @@ def main():
 
     factor = protocol_factor(Protocol)
     totalnodes = num_replicas(factor, args.faults)
+    # Upstream BASIC_CHEAP_AND_QUICK assumes every replica owns the trusted
+    # Checker+Accumulator component.  Keep the generated node configuration
+    # consistent with that model.
+    if Protocol == "Basic-Damysus":
+        args.totaltee = totalnodes
     if args.totaltee < 0 or args.totaltee > totalnodes:
         parser.error(f"--totaltee must be between 0 and the replica count ({totalnodes})")
     build_totaltee = totalnodes if args.local and args.config_all_tee else args.totaltee

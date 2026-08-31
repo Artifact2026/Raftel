@@ -88,6 +88,11 @@ sgx_status_t COMB_TEEprepare(sgx_enclave_id_t eid, sgx_status_t* retval, basicbl
 sgx_status_t COMB_TEEstore(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, just_t* res);
 sgx_status_t COMB_TEEaccum(sgx_enclave_id_t eid, sgx_status_t* retval, onejusts_t* js, accum_t* res);
 sgx_status_t COMB_TEEaccumSp(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, accum_t* res);
+sgx_status_t DAMYSUS_TEEsign(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just);
+sgx_status_t DAMYSUS_TEEprepare(sgx_enclave_id_t eid, sgx_status_t* retval, hash_t* hash, accum_t* acc, just_t* res);
+sgx_status_t DAMYSUS_TEEstore(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, just_t* res);
+sgx_status_t DAMYSUS_TEEaccum(sgx_enclave_id_t eid, sgx_status_t* retval, onejusts_t* js, accum_t* res);
+sgx_status_t DAMYSUS_TEEaccumSp(sgx_enclave_id_t eid, sgx_status_t* retval, just_t* just, accum_t* res);
 sgx_status_t FREE_TEEauth(sgx_enclave_id_t eid, sgx_status_t* retval, payload_t* text, auth_t* res);
 sgx_status_t FREE_TEEverify(sgx_enclave_id_t eid, sgx_status_t* retval, payload_t* text, auths_t* a, bool* res);
 sgx_status_t FREE_TEEverify2(sgx_enclave_id_t eid, sgx_status_t* retval, payload_t* text1, auths_t* a1, payload_t* text2, auths_t* a2, bool* res);

@@ -148,6 +148,13 @@ int main(int argc, char const *argv[]) {
                    sizeof(MsgPrepare),
                    sizeof(MsgPreCommit),
                    sizeof(MsgCommit)});
+#elif defined(BASIC_DAMYSUS)
+  size = std::max({size,
+                   sizeof(MsgNewViewDamysus),
+                   sizeof(MsgLdrPrepareDamysus),
+                   sizeof(MsgPrepareDamysus),
+                   sizeof(MsgPreCommitDamysus),
+                   sizeof(MsgCommitDamysus)});
 #else
 #error "Unsupported protocol macro for Server.cpp"
 #endif

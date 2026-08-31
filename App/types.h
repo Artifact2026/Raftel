@@ -26,6 +26,14 @@ typedef uint8_t HEADER;
 #define HDR_PRECOMMIT_COMB   0x12
 #define HDR_COMMIT_COMB   0x37
 
+// Basic Damysus (upstream BASIC_CHEAP_AND_QUICK), kept separate from the
+// hybrid protocol wire format.
+#define HDR_NEWVIEW_DAMYSUS     0x38
+#define HDR_PREPARE_LDR_DAMYSUS 0x39
+#define HDR_PREPARE_DAMYSUS     0x3A
+#define HDR_PRECOMMIT_DAMYSUS   0x3B
+#define HDR_COMMIT_DAMYSUS      0x3C
+
 #define HDR_NEWVIEW_FREE     0x13
 #define HDR_PREPARE_LDR_FREE 0x14
 #define HDR_PREPARE_BCK_FREE 0x15

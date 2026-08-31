@@ -593,6 +593,9 @@ void Handler::startNewViewOnTimeout() {
   startNewViewComb();
 #elif defined (CHAINED_HYBRID_TEE) || defined (CHAINED_HYBRID_TEE_DEBUG)
   startNewViewChComb();
+#elif defined(BASIC_HOTSTUFF)
+  if (DEBUG0) std::cout << KMAG << nfo() << "starting a new HotStuff view" << KNRM << std::endl;
+  startNewView();
 #else
   recordStats();
 #endif
@@ -608,6 +611,12 @@ const uint8_t MsgPrepareComb::opcode;
 const uint8_t MsgNewViewChComb::opcode;
 const uint8_t MsgLdrPrepareChComb::opcode;
 const uint8_t MsgPrepareChComb::opcode;
+#elif defined(BASIC_HOTSTUFF)
+const uint8_t MsgNewView::opcode;
+const uint8_t MsgLdrPrepare::opcode;
+const uint8_t MsgPrepare::opcode;
+const uint8_t MsgPreCommit::opcode;
+const uint8_t MsgCommit::opcode;
 #else
 #error "Unsupported protocol macro for Handler opcodes"
 #endif
@@ -775,6 +784,12 @@ pnet(pec,pconf), cnet(cec,cconf) {
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newview_ch_comb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepare_ch_comb,    this, _1, _2));
   this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepare_ch_comb, this, _1, _2));
+#elif defined(BASIC_HOTSTUFF)
+  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_newview,    this, _1, _2));
+  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_prepare,    this, _1, _2));
+  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_ldrprepare, this, _1, _2));
+  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_precommit,  this, _1, _2));
+  this->pnet.reg_handler(salticidae::generic_bind(&Handler::handle_commit,     this, _1, _2));
 #else
   #error "Unsupported protocol macro for Handler pnet handlers"
 #endif
@@ -1568,6 +1583,14 @@ void Handler::getStarted() {
     handleEarlierMessagesChComb();
   }
   if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << nextLeader << ")" << KNRM << std::endl;
+#elif defined(BASIC_HOTSTUFF)
+  Just j = callTEEsign();
+  if (DEBUG1) std::cout << KBLU << nfo() << "initial just:" << j.prettyPrint() << KNRM << std::endl;
+  MsgNewView msg(j.getRData(),j.getSigns());
+  if (DEBUG1) std::cout << KBLU << nfo() << "starting with:" << msg.prettyPrint() << KNRM << std::endl;
+  if (amCurrentLeader()) { handleNewview(msg); }
+  else { sendMsgNewView(msg,recipients); }
+  if (DEBUG) std::cout << KBLU << nfo() << "sent new-view to leader(" << leader << ")" << KNRM << std::endl;
 #else
   #error "Unsupported protocol macro for Handler::getStarted"
 #endif

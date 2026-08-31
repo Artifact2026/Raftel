@@ -62,7 +62,7 @@ def tee_quorum_size(totaltee: int, faults: int) -> int:
 #   run --p2 FlexiBFT          ~ experiments multi-branch
 #   run --p3 Damysus           ~ experiments --p6 chained COMB (CHAINED_HYBRID_TEE)
 #   run --p4 Oneshot           ~ experiments --p8 (ONEP / BASIC_ONEP)
-#   run --p5 Hotstuff          ~ experiments --p1 (BASE / BASIC_BASELINE)
+#   run --p5 Hotstuff          ~ experiments --p1 (BASE / BASIC_HOTSTUFF)
 # Local defaults aligned with experiments.py: numViews=10, numClTrans=1, config isTEE:1 for all nodes.
 
 
@@ -1439,7 +1439,7 @@ def mkParams(protocol,debug,constFactor,numFaults,totaltee,numTrans,payloadSize,
     elif protocol == "Oneshot":
         f.write("#define BASIC_ONEP\n")
     elif protocol == "Hotstuff":
-        f.write("#define BASIC_BASELINE\n")
+        f.write("#define BASIC_HOTSTUFF\n")
     f.write("#define MAX_NUM_NODES " + str((constFactor*numFaults)+1) + "\n")
 
     # if protocol == "Chained-HybridTEE":

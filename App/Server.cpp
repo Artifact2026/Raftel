@@ -141,6 +141,13 @@ int main(int argc, char const *argv[]) {
                    sizeof(MsgNewViewChComb),
                    sizeof(MsgLdrPrepareChComb),
                    sizeof(MsgPrepareChComb)});
+#elif defined(BASIC_HOTSTUFF)
+  size = std::max({size,
+                   sizeof(MsgNewView),
+                   sizeof(MsgLdrPrepare),
+                   sizeof(MsgPrepare),
+                   sizeof(MsgPreCommit),
+                   sizeof(MsgCommit)});
 #else
 #error "Unsupported protocol macro for Server.cpp"
 #endif

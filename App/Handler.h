@@ -31,7 +31,7 @@
 #include "sgx_urts.h"
 #include "sgx_utils/sgx_utils.h"
 //
-#elif defined(BASIC_HYBRID_TEE_DEBUG) || defined(CHAINED_HYBRID_TEE_DEBUG)
+#elif defined(BASIC_HYBRID_TEE_DEBUG) || defined(CHAINED_HYBRID_TEE_DEBUG) || defined(BASIC_HOTSTUFF)
 //
 #include "TrustedFun.h"
 #include "TrustedAccum.h"
@@ -40,7 +40,7 @@
 #include "TrustedChComb.h"
 //
 #else
-#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_HYBRID_TEE, BASIC_HYBRID_TEE_DEBUG, CHAINED_HYBRID_TEE_DEBUG."
+#error "Unsupported protocol macro. Keep only BASIC_HYBRID_TEE, CHAINED_HYBRID_TEE, BASIC_HYBRID_TEE_DEBUG, CHAINED_HYBRID_TEE_DEBUG, BASIC_HOTSTUFF."
 #endif
 // ------------------------------------
 

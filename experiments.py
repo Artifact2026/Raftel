@@ -353,7 +353,7 @@ mybridge    = "damysusNet" # "bridge"
 ## Code
 
 class Protocol(Enum):
-    BASE      = "BASIC_BASELINE"           # basic baseline
+    BASE      = "BASIC_HOTSTUFF"           # basic HotStuff
     CHEAP     = "BASIC_CHEAP"              # Checker only
     QUICK     = "BASIC_QUICK"              # Accumulator only
     COMB      = "BASIC_HYBRID_TEE"    # Damysus (Checker + Accumulator)
@@ -2037,7 +2037,7 @@ def updateDictionaries(protVal,numFaults,numDeads,pointVal,dBase,dCheap,dQuick,d
     if deadNodes:
         key = numDeads
 
-    if protVal == "BASIC_BASELINE":
+    if protVal == "BASIC_HOTSTUFF":
         (val,num) = dBase.get(key,([],0))
         val.append(float(pointVal))
         dBase.update({key:(val,num+1)})
@@ -2409,7 +2409,7 @@ def createTVLplot(cFile,instances):
             throughput = float(thrVal)
             latency    = float(latVal)
             sleep      = float(sleepVal)
-            if protVal == "BASIC_BASELINE":
+            if protVal == "BASIC_HOTSTUFF":
                 TBase.append(throughput)
                 LBase.append(latency)
                 aBase.append(sleep)

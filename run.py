@@ -71,10 +71,10 @@ def protocol_totaltee(protocol: str, faults: int, totalnodes: int, requested: in
 # --- run.py CLI flags vs experiments.py (for comparable experiments) ---
 # experiments.py uses --p1..--p8; run.py uses different numbering. Rough mapping:
 #   run --p0 HybridTEE          -> BASIC_HYBRID_TEE
-#   run --p01 Chained-Hybrid   ~ (no direct single flag; see experiments CH*)
-#   run --p1 Achilles          ~ experiments Achilles branch
-#   run --p5 Hotstuff          ~ experiments --p1 (BASE / BASIC_HOTSTUFF)
-#   run --p6 Basic-Damysus     ~ upstream BASIC_CHEAP_AND_QUICK / BASIC_DAMYSUS
+#   run --p1 Chained-Hybrid    ~ (no direct single flag; see experiments CH*)
+#   run --p2 Achilles          ~ experiments Achilles branch
+#   run --p3 Hotstuff          ~ experiments --p1 (BASE / BASIC_HOTSTUFF)
+#   run --p4 Basic-Damysus     ~ upstream BASIC_CHEAP_AND_QUICK / BASIC_DAMYSUS
 # Local defaults aligned with experiments.py: numViews=10, numClTrans=1, config isTEE:1 for all nodes.
 
 
@@ -2679,10 +2679,10 @@ def experiment(
 def main():
     parser = argparse.ArgumentParser(description='Start one experiment with given parameters.')
     parser.add_argument("--p0",        action="store_true",    help="run HybridTEE")
-    parser.add_argument("--p01",       action="store_true",    help="run Chianed-HybridTEE")
-    parser.add_argument("--p1",        action="store_true",    help="run Achilles")
-    parser.add_argument("--p5",        action="store_true",    help="run hotstuff")
-    parser.add_argument("--p6",        action="store_true",    help="run basic Damysus")
+    parser.add_argument("--p1",        action="store_true",    help="run Chained-HybridTEE")
+    parser.add_argument("--p2",        action="store_true",    help="run Achilles")
+    parser.add_argument("--p3",        action="store_true",    help="run hotstuff")
+    parser.add_argument("--p4",        action="store_true",    help="run basic Damysus")
     parser.add_argument("--debug",     action="store_true",    help="non_TEE")
     parser.add_argument("--local",     action="store_true",    help="run locally")
     parser.add_argument('--batchsize', type=int,  default=400, help='MAX_NUM_TRANSACTIONS in params (compile-time batch capacity)')
@@ -2774,13 +2774,13 @@ def main():
 
     if args.p0:
         Protocol = "HybridTEE"
-    elif args.p01:
-        Protocol = "Chained-HybridTEE"
     elif args.p1:
+        Protocol = "Chained-HybridTEE"
+    elif args.p2:
         Protocol = "Achilles"
-    elif args.p5:
+    elif args.p3:
         Protocol = "Hotstuff"
-    elif args.p6:
+    elif args.p4:
         Protocol = "Basic-Damysus"
     else:
         Protocol = "HybridTEE"

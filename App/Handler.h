@@ -94,6 +94,8 @@ class Handler {
   unsigned int tqsize;           // tee quorum size
   unsigned int total;            // total number of nodes
   unsigned int totalTEE;         // total number of TEE nodes
+  bool fixedLeaderMode;          // true: use fixedLeader for every view; false: rotate
+  PID fixedLeader;               // replica selected when fixedLeaderMode is true
   bool fastQC = false;           // true iff the configured TEE population can form QT
   Nodes nodes;                   // collection of the other nodes
   KEY priv;                      // private key
@@ -458,7 +460,7 @@ class Handler {
   void handle_ldrprepare_ch_comb(MsgLdrPrepareChComb msg, const PeerNet::conn_t &conn);
 
  public:
-  Handler(KeysFun kf, PID id, bool nodeType, unsigned long int timeout, unsigned int opdist, unsigned int constFactor, unsigned int numFaults, unsigned int totaltee, unsigned int maxViews, Nodes nodes, KEY priv, PeerNet::Config pconf, ClientNet::Config cconf);
+  Handler(KeysFun kf, PID id, bool nodeType, unsigned long int timeout, unsigned int opdist, unsigned int constFactor, unsigned int numFaults, unsigned int totaltee, unsigned int maxViews, Nodes nodes, KEY priv, PeerNet::Config pconf, ClientNet::Config cconf, bool fixedLeaderMode = false, PID fixedLeader = 0);
 };
 
 

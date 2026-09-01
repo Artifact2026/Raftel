@@ -581,7 +581,7 @@ void Handler::startNewViewOnTimeout() {
   // Blame the nominal leader for this view (same index as pre-skip rotation) so the next
   // timeout-driven view-change does not schedule that replica as leader again while suspected down.
   unsigned int pool = this->total;
-  if (pool > 0) {
+  if (!this->fixedLeaderMode && pool > 0) {
     unsigned int suspected = static_cast<unsigned int>(this->view % pool);
     skippedLeaders.insert(suspected);
     if (DEBUG1) {
@@ -642,7 +642,7 @@ const uint8_t MsgStart::opcode;
 
 
 
-Handler::Handler(KeysFun k, PID id, bool nodeType, unsigned long int timeout, unsigned int opdist, unsigned int constFactor, unsigned int numFaults, unsigned int totaltee, unsigned int maxViews, Nodes nodes, KEY priv, PeerNet::Config pconf, ClientNet::Config cconf) :
+Handler::Handler(KeysFun k, PID id, bool nodeType, unsigned long int timeout, unsigned int opdist, unsigned int constFactor, unsigned int numFaults, unsigned int totaltee, unsigned int maxViews, Nodes nodes, KEY priv, PeerNet::Config pconf, ClientNet::Config cconf, bool fixedLeaderMode, PID fixedLeader) :
 pnet(pec,pconf), cnet(cec,cconf) {
   this->myid         = id;
   this->nodeType     = nodeType;
@@ -652,6 +652,8 @@ pnet(pec,pconf), cnet(cec,cconf) {
   this->numFaults    = numFaults;
   this->total        = (constFactor*this->numFaults)+1;
   this->totalTEE     = totaltee;
+  this->fixedLeaderMode = fixedLeaderMode;
+  this->fixedLeader  = fixedLeader;
   this->qsize        = this->total-this->numFaults;
   // Raftel: QT = max(floor(m/2)+1, f+1).  The first term gives
   // TEE/TEE quorum intersection; the second gives TEE/Mixed intersection.
@@ -916,6 +918,7 @@ void Handler::printClientInfo() {
 
 // leader rotation
 unsigned int Handler::getLeaderOf(View v) {
+  if (this->fixedLeaderMode) { return this->fixedLeader; }
   // Raftel rotates leadership over every replica.  The leader's trust type
   // selects the fast path or the classical fallback path for that view.
   unsigned int pool = this->total;

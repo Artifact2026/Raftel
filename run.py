@@ -209,6 +209,8 @@ def ssh_exec_server_non_blocking(
     opdist,
     *,
     view_timeout=None,
+    leader_mode="rotate",
+    leader_id=0,
     clear_remote_stats: bool = True,
 ):
     ssh = SSHClient()
@@ -218,9 +220,9 @@ def ssh_exec_server_non_blocking(
     vc_to = float(timeout if view_timeout is None else view_timeout)
     rm_stats = "rm -rf stats/* && " if clear_remote_stats else ""
     if debug:
-        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./server {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} > out{id}"
+        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./server {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} {leader_mode} {leader_id} > out{id}"
     else:
-        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./sgxserver {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} > out{id}"
+        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./sgxserver {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} {leader_mode} {leader_id} > out{id}"
     stdin, stdout, stderr = ssh.exec_command(cmd)
 
     # Non-blocking monitoring of command execution status
@@ -351,6 +353,8 @@ def start_all_sgxservers(
     max_workers=6,
     *,
     view_timeout=None,
+    leader_mode="rotate",
+    leader_id=0,
     clear_remote_stats: bool = True,
 ):
     completion_set = set()
@@ -372,6 +376,8 @@ def start_all_sgxservers(
                 num_views,
                 opdist,
                 view_timeout=view_timeout,
+                leader_mode=leader_mode,
+                leader_id=leader_id,
                 clear_remote_stats=clear_remote_stats,
             )
             for id, host, port1, port2 in servers
@@ -649,6 +655,8 @@ def start_local_server_process(
     num_views: int,
     timeout_val: int,
     local_opdist: int,
+    leader_mode: str = "rotate",
+    leader_id: int = 0,
 ):
     """
     Start one local replica process without shell wrapping, so kill/terminate
@@ -664,6 +672,8 @@ def start_local_server_process(
         str(num_views),
         str(timeout_val),
         str(local_opdist),
+        leader_mode,
+        str(leader_id),
     ]
     return Popen(cmd, cwd=str(PROJECT_ROOT), preexec_fn=os.setsid)
 
@@ -1470,6 +1480,8 @@ def experiment_local(
     repeats=1,
     config_by_totaltee=True,
     local_opdist=0,
+    leader_mode="rotate",
+    leader_id=0,
     print_vals_means=False,
     cutoff_sec=None,
     stats_summary_label=None,
@@ -1556,6 +1568,8 @@ def experiment_local(
                     num_views,
                     timeout,
                     local_opdist,
+                    leader_mode,
+                    leader_id,
                 )
                 rep_procs.append(("R", i, p))
 
@@ -1802,6 +1816,8 @@ def experiment_fault_local(
     repeats=1,
     config_by_totaltee=True,
     local_opdist=0,
+    leader_mode="rotate",
+    leader_id=0,
     print_vals_means=False,
     cutoff_sec=None,
     live_plot_reference_replica=None,
@@ -1888,6 +1904,8 @@ def experiment_fault_local(
                     num_views,
                     timeout,
                     local_opdist,
+                    leader_mode,
+                    leader_id,
                 )
                 rep_procs.append(("R", i, p))
 
@@ -2166,6 +2184,8 @@ def experiment_fault_cloud(
     dead_node_id: int = 1,
     kill_after_sec: float = 2.0,
     view_timeout=None,
+    leader_mode="rotate",
+    leader_id=0,
     cutoff_sec=None,
     stats_poll_interval: float = 0.5,
     live_plot_reference_replica=None,
@@ -2242,6 +2262,8 @@ def experiment_fault_cloud(
         num_views,
         local_opdist,
         view_timeout=view_timeout,
+        leader_mode=leader_mode,
+        leader_id=leader_id,
         clear_remote_stats=True,
     )
 
@@ -2396,6 +2418,8 @@ def experiment(
     kv_keys=None,
     kv_vlen=None,
     view_timeout=None,
+    leader_mode="rotate",
+    leader_id=0,
     stats_summary_label=None,
 ):
     """
@@ -2455,6 +2479,8 @@ def experiment(
         num_views,
         local_opdist,
         view_timeout=view_timeout,
+        leader_mode=leader_mode,
+        leader_id=leader_id,
     )
     print("start")
     wait_before_client = 5 + int(math.ceil(math.log(faults, 2)))
@@ -2586,6 +2612,8 @@ def main():
     parser.add_argument('--fault-node-id',type=int,default=1,help='replica index to kill in --fault-local mode (default 1)',)
     parser.add_argument('--fault-after-sec', type=float, default=2.0, help='seconds after starting the client to kill the fault node (default 2.0)',)
     parser.add_argument('--view-timeout',type=float,default=None,help='view-change timeout in seconds (server argv; default: built-in 5s; ~2s is reasonable on WAN with ~100ms RTT)',)
+    parser.add_argument('--leader-mode', choices=('rotate', 'fixed'), default='fixed', help='leader selection: rotate across replicas (default) or always use --leader-id')
+    parser.add_argument('--leader-id', type=int, default=0, help='fixed leader replica id when --leader-mode=fixed (default 0)')
     # Cloud / SSH fault injection (mirrors --fault-local but uses SSH + periodic stats pull).
     parser.add_argument('--fault-cloud',action='store_true',help='remote cluster: kill one replica mid-run (no restart), poll stats/live-* from all nodes, plot mean throughput (omit --local)',)
     parser.add_argument(
@@ -2660,6 +2688,8 @@ def main():
         args.totaltee = totalnodes
     if args.totaltee < 0 or args.totaltee > totalnodes:
         parser.error(f"--totaltee must be between 0 and the replica count ({totalnodes})")
+    if args.leader_id < 0 or args.leader_id >= totalnodes:
+        parser.error(f"--leader-id must be between 0 and {totalnodes - 1}")
     build_totaltee = totalnodes if args.local and args.config_all_tee else args.totaltee
     # Local mode always regenerates `config` via genLocalConf(...), so skip mkConfig here.
     # This avoids an intermediate config written with mkConfig's instance-rounding policy.
@@ -2686,6 +2716,8 @@ def main():
                 repeats=args.repeats,
                 config_by_totaltee=not args.config_all_tee,
                 local_opdist=args.opdist,
+                leader_mode=args.leader_mode,
+                leader_id=args.leader_id,
                 print_vals_means=args.print_vals_mean,
                 cutoff_sec=args.cutoff_sec,
                 live_plot_reference_replica=args.live_plot_reference_replica,
@@ -2709,6 +2741,8 @@ def main():
                 repeats=args.repeats,
                 config_by_totaltee=not args.config_all_tee,
                 local_opdist=args.opdist,
+                leader_mode=args.leader_mode,
+                leader_id=args.leader_id,
                 print_vals_means=args.print_vals_mean,
                 cutoff_sec=args.cutoff_sec,
                 stats_summary_label=args.stats_summary_label,
@@ -2731,6 +2765,8 @@ def main():
                 dead_node_id=args.fault_node_id,
                 kill_after_sec=args.fault_after_sec,
                 view_timeout=args.view_timeout,
+                leader_mode=args.leader_mode,
+                leader_id=args.leader_id,
                 cutoff_sec=args.cutoff_sec,
                 live_plot_reference_replica=args.live_plot_reference_replica,
                 live_plot_exclude_fault_node=not args.live_plot_include_fault_node,
@@ -2752,6 +2788,8 @@ def main():
                 cl_sleep_us=max(0, args.cl_sleep),
                 local_opdist=args.opdist,
                 view_timeout=args.view_timeout,
+                leader_mode=args.leader_mode,
+                leader_id=args.leader_id,
                 stats_summary_label=args.stats_summary_label,
             )
 

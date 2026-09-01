@@ -67,6 +67,11 @@ int main(int argc, char const *argv[]) {
   if (argc > 8) { sscanf(argv[8], "%d", &opdist); }
   std::cout << KYEL << "[" << myid << "]opdist=" << opdist << KNRM << std::endl;
 
+  std::string leaderMode = "rotate";
+  if (argc > 9) leaderMode = argv[9];
+  unsigned int fixedLeader = 0;
+  if (argc > 10) { sscanf(argv[10], "%d", &fixedLeader); }
+
 
   // -- Public key
   KEY priv;
@@ -100,6 +105,17 @@ int main(int argc, char const *argv[]) {
 
 
   unsigned int numNodes = (constFactor*numFaults)+1;
+  if (leaderMode != "rotate" && leaderMode != "fixed") {
+    std::cerr << "leader mode must be 'rotate' or 'fixed'" << std::endl;
+    return 1;
+  }
+  if (leaderMode == "fixed" && fixedLeader >= numNodes) {
+    std::cerr << "fixed leader id " << fixedLeader << " is outside replica range [0,"
+              << (numNodes - 1) << "]" << std::endl;
+    return 1;
+  }
+  std::cout << KYEL << "[" << myid << "]leaderMode=" << leaderMode
+            << ", fixedLeader=" << fixedLeader << KNRM << std::endl;
   std::string confFile = "config";
   Nodes nodes(confFile,numNodes);
   if (DEBUG1) std::cout << KRED << "Node"<< myid << "isTEE" << nodes.find(0)->getIsTEE() << KNRM << std::endl;
@@ -211,7 +227,8 @@ int main(int argc, char const *argv[]) {
   //config.ping_period(2);
   if (DEBUG1) std::cout << KYEL << "[" << myid << "]starting handler" << KNRM << std::endl;
   bool tee = (nodeType == "TEE");
-  Handler handler(kf, myid, tee, timeout, opdist, constFactor, numFaults, totaltee, numViews, nodes, priv, pconfig, cconfig);
+  Handler handler(kf, myid, tee, timeout, opdist, constFactor, numFaults, totaltee, numViews,
+                  nodes, priv, pconfig, cconfig, leaderMode == "fixed", fixedLeader);
 
   return 0;
 };

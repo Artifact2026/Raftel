@@ -23,7 +23,7 @@ from typing import Optional
 # Protocol metadata: quorum factor (e.g. 3f+1 vs 2f+1) and git branch for makeInstance checkout.
 _PROTOCOL_CHECKOUT = {
     "HybridTEE": (3, "main"),
-    "Chained-HybridTEE": (2, "main"),
+    "Chained-HybridTEE": (3, "main"),
     "Achilles": (2, "main"),
     "Hotstuff": (3, "main"),
     "Basic-Damysus": (2, "main"),
@@ -49,6 +49,23 @@ def num_replicas(factor: int, faults: int) -> int:
 def tee_quorum_size(totaltee: int, faults: int) -> int:
     """Return QT using the same formula as Handler::tqsize."""
     return max((totaltee // 2) + 1, faults + 1)
+
+
+def protocol_totaltee(protocol: str, faults: int, totalnodes: int, requested: int) -> int:
+    """Resolve the protocol-defined trusted replica population.
+
+    Only HybridTEE exposes a configurable trusted population.  The remaining
+    protocols use the populations from their original protocol definitions.
+    """
+    if protocol == "HybridTEE":
+        return requested
+    if protocol == "Chained-HybridTEE":
+        return faults + 1
+    if protocol in ("Achilles", "Basic-Damysus"):
+        return totalnodes
+    if protocol == "Hotstuff":
+        return 0
+    raise ValueError(f"Unknown protocol: {protocol!r}")
 
 
 # --- run.py CLI flags vs experiments.py (for comparable experiments) ---
@@ -2671,7 +2688,12 @@ def main():
     parser.add_argument('--batchsize', type=int,  default=400, help='MAX_NUM_TRANSACTIONS in params (compile-time batch capacity)')
     parser.add_argument('--payload',   type=int,  default=256, help='Payload size')
     parser.add_argument('--faults',    type=int,  default=1,   help='Number of faults')
-    parser.add_argument('--totaltee',  type=int,  default=0,   help='Number of TEE nodes (p01 overrides this with faults + 1)')
+    parser.add_argument(
+        '--totaltee',
+        type=int,
+        default=0,
+        help='Number of TEE nodes for HybridTEE; other protocols use their protocol-defined value',
+    )
     parser.add_argument('--pct',       type=int,  default=0,   help='counter delay')
     # Local experiment parity with experiments.py (execute/computeAvgStats)
     parser.add_argument('--views',type=int,default=10,help='numViews passed to each server (default 10, same as experiments.py)',)
@@ -2768,16 +2790,14 @@ def main():
 
     factor = protocol_factor(Protocol)
     totalnodes = num_replicas(factor, args.faults)
-    # Chained-HybridTEE uses the minimum trusted population required by its
-    # TEE quorum: m = f + 1.  Apply this before generating configs and binaries
-    # so runtime node roles and compile-time quorum capacities stay aligned.
-    if Protocol == "Chained-HybridTEE":
-        args.totaltee = args.faults + 1
-    # Upstream BASIC_CHEAP_AND_QUICK assumes every replica owns the trusted
-    # Checker+Accumulator component.  Keep the generated node configuration
-    # consistent with that model.
-    if Protocol == "Basic-Damysus":
-        args.totaltee = totalnodes
+    # Resolve protocol-defined TEE populations before generating configs and
+    # binaries so node roles, runtime thresholds, and compile-time capacities
+    # all use the same value.  Only HybridTEE honors --totaltee.
+    args.totaltee = protocol_totaltee(
+        Protocol, args.faults, totalnodes, args.totaltee
+    )
+    if args.config_all_tee and Protocol != "HybridTEE":
+        parser.error("--config-all-tee is only valid for HybridTEE")
     if args.totaltee < 0 or args.totaltee > totalnodes:
         parser.error(f"--totaltee must be between 0 and the replica count ({totalnodes})")
     if args.leader_id < 0 or args.leader_id >= totalnodes:

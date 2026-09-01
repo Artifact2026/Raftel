@@ -71,6 +71,10 @@ int main(int argc, char const *argv[]) {
   if (argc > 9) leaderMode = argv[9];
   unsigned int fixedLeader = 0;
   if (argc > 10) { sscanf(argv[10], "%d", &fixedLeader); }
+  bool useRedis = false;
+  if (argc > 11) { useRedis = (std::string(argv[11]) == "redis"); }
+  std::cout << KYEL << "[" << myid << "]appBackend="
+            << (useRedis ? "redis" : "memory") << KNRM << std::endl;
 
 
   // -- Public key
@@ -228,7 +232,7 @@ int main(int argc, char const *argv[]) {
   if (DEBUG1) std::cout << KYEL << "[" << myid << "]starting handler" << KNRM << std::endl;
   bool tee = (nodeType == "TEE");
   Handler handler(kf, myid, tee, timeout, opdist, constFactor, numFaults, totaltee, numViews,
-                  nodes, priv, pconfig, cconfig, leaderMode == "fixed", fixedLeader);
+                  nodes, priv, pconfig, cconfig, leaderMode == "fixed", fixedLeader, useRedis);
 
   return 0;
 };

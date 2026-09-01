@@ -1,6 +1,7 @@
 #include "KVApp.h"
 
 #include <cstring>
+#include <stdexcept>
 
 namespace {
 constexpr size_t kHeaderBytes = 14;  // op(1) + reserved(1) + klen(2) + vlen(2) + cid(4) + rid(4)
@@ -72,7 +73,21 @@ bool KVAppCodec::decode(const Transaction &tx, AppRequest &out) {
   return true;
 }
 
-KVAppExecutor::KVAppExecutor(int rid, int port) : replica_id(rid), redis_port(port) {}
+KVAppExecutor::KVAppExecutor(int rid, int port, bool useRedis)
+    : replica_id(rid), redis_port(port), use_redis(useRedis) {
+  // Redis is part of the measured application path.  Starting a replica
+  // without it would silently turn an end-to-end Redis benchmark into an
+  // in-process unordered_map benchmark, so fail the replica immediately.
+  if (use_redis && !ensureRedisConnected()) {
+#if !KVAPP_HAS_HIREDIS
+    throw std::runtime_error("Redis is required, but this binary was built without hiredis support");
+#else
+    throw std::runtime_error(
+        "Redis is required, but replica " + std::to_string(replica_id) +
+        " could not connect to 127.0.0.1:" + std::to_string(redis_port));
+#endif
+  }
+}
 
 KVAppExecutor::~KVAppExecutor() {
 #if KVAPP_HAS_HIREDIS
@@ -101,7 +116,6 @@ bool KVAppExecutor::ensureRedisConnected() {
   const struct timeval timeout = {1, 0};
   redis_ctx = redisConnectWithTimeout("127.0.0.1", this->redis_port, timeout);
   if (redis_ctx == nullptr || redis_ctx->err != 0) {
-    if (!this->warned_redis_unavailable) { this->warned_redis_unavailable = true; }
     if (redis_ctx != nullptr) {
       redisFree(redis_ctx);
       redis_ctx = nullptr;
@@ -114,11 +128,13 @@ bool KVAppExecutor::ensureRedisConnected() {
 
 AppReply KVAppExecutor::execRedis(const AppRequest &req) {
 #if !KVAPP_HAS_HIREDIS
-  return execFallback(req);
+  throw std::runtime_error("Redis operation attempted without hiredis support");
 #else
   AppReply rep;
   if (!ensureRedisConnected()) {
-    return execFallback(req);
+    throw std::runtime_error(
+        "lost Redis connection on replica " + std::to_string(replica_id) +
+        " (127.0.0.1:" + std::to_string(redis_port) + ")");
   }
 
   if (req.op == OpType::OP_SET) {
@@ -126,7 +142,7 @@ AppReply KVAppExecutor::execRedis(const AppRequest &req) {
         redisCommand(redis_ctx, "SET %b %b", req.key.data(), req.key.size(), req.value.data(), req.value.size()));
     if (reply == nullptr) {
       if (redis_ctx != nullptr) { redisFree(redis_ctx); redis_ctx = nullptr; }
-      return execFallback(req);
+      throw std::runtime_error("Redis SET failed on replica " + std::to_string(replica_id));
     }
     rep.status = (reply->type == REDIS_REPLY_STATUS || reply->type == REDIS_REPLY_STRING)
                      ? ReplyStatus::REPLY_OK
@@ -139,7 +155,7 @@ AppReply KVAppExecutor::execRedis(const AppRequest &req) {
         redisCommand(redis_ctx, "GET %b", req.key.data(), req.key.size()));
     if (reply == nullptr) {
       if (redis_ctx != nullptr) { redisFree(redis_ctx); redis_ctx = nullptr; }
-      return execFallback(req);
+      throw std::runtime_error("Redis GET failed on replica " + std::to_string(replica_id));
     }
     if (reply->type == REDIS_REPLY_NIL) {
       rep.status = ReplyStatus::REPLY_NOT_FOUND;
@@ -159,7 +175,7 @@ AppReply KVAppExecutor::execRedis(const AppRequest &req) {
         redisCommand(redis_ctx, "DEL %b", req.key.data(), req.key.size()));
     if (reply == nullptr) {
       if (redis_ctx != nullptr) { redisFree(redis_ctx); redis_ctx = nullptr; }
-      return execFallback(req);
+      throw std::runtime_error("Redis DEL failed on replica " + std::to_string(replica_id));
     }
     if (reply->type == REDIS_REPLY_INTEGER) {
       rep.status = ReplyStatus::REPLY_OK;
@@ -176,45 +192,34 @@ AppReply KVAppExecutor::execRedis(const AppRequest &req) {
 #endif
 }
 
-AppReply KVAppExecutor::execFallback(const AppRequest &req) {
-  AppReply rep;
-  if (req.op == OpType::OP_SET) {
-    this->mem_fallback[req.key] = req.value;
-    rep.status = ReplyStatus::REPLY_OK;
-    return rep;
-  }
-  if (req.op == OpType::OP_GET) {
-    auto it = this->mem_fallback.find(req.key);
-    if (it == this->mem_fallback.end()) {
-      rep.status = ReplyStatus::REPLY_NOT_FOUND;
-    } else {
-      rep.status = ReplyStatus::REPLY_OK;
-      rep.value = it->second;
-    }
-    return rep;
-  }
-  if (req.op == OpType::OP_DEL) {
-    auto it = this->mem_fallback.find(req.key);
-    if (it == this->mem_fallback.end()) {
-      rep.status = ReplyStatus::REPLY_OK;
-      rep.del_count = 0;
-    } else {
-      this->mem_fallback.erase(it);
-      rep.status = ReplyStatus::REPLY_OK;
-      rep.del_count = 1;
-    }
-    return rep;
-  }
-  rep.status = ReplyStatus::REPLY_ERROR;
-  return rep;
-}
-
 AppReply KVAppExecutor::execute(const AppRequest &req) {
   std::string key = dedupKey(req.client_id, req.req_id);
   auto it = dedup_cache.find(key);
   if (it != dedup_cache.end()) { return it->second; }
 
-  AppReply rep = execRedis(req);
+  AppReply rep = use_redis ? execRedis(req) : execMemory(req);
   dedup_cache[key] = rep;
+  return rep;
+}
+
+AppReply KVAppExecutor::execMemory(const AppRequest &req) {
+  AppReply rep;
+  if (req.op == OpType::OP_SET) {
+    mem_store[req.key] = req.value;
+    rep.status = ReplyStatus::REPLY_OK;
+  } else if (req.op == OpType::OP_GET) {
+    auto it = mem_store.find(req.key);
+    if (it == mem_store.end()) {
+      rep.status = ReplyStatus::REPLY_NOT_FOUND;
+    } else {
+      rep.status = ReplyStatus::REPLY_OK;
+      rep.value = it->second;
+    }
+  } else if (req.op == OpType::OP_DEL) {
+    rep.status = ReplyStatus::REPLY_OK;
+    rep.del_count = static_cast<int>(mem_store.erase(req.key));
+  } else {
+    rep.status = ReplyStatus::REPLY_ERROR;
+  }
   return rep;
 }

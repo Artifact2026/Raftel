@@ -642,7 +642,7 @@ const uint8_t MsgStart::opcode;
 
 
 
-Handler::Handler(KeysFun k, PID id, bool nodeType, unsigned long int timeout, unsigned int opdist, unsigned int constFactor, unsigned int numFaults, unsigned int totaltee, unsigned int maxViews, Nodes nodes, KEY priv, PeerNet::Config pconf, ClientNet::Config cconf, bool fixedLeaderMode, PID fixedLeader) :
+Handler::Handler(KeysFun k, PID id, bool nodeType, unsigned long int timeout, unsigned int opdist, unsigned int constFactor, unsigned int numFaults, unsigned int totaltee, unsigned int maxViews, Nodes nodes, KEY priv, PeerNet::Config pconf, ClientNet::Config cconf, bool fixedLeaderMode, PID fixedLeader, bool useRedis) :
 pnet(pec,pconf), cnet(cec,cconf) {
   this->myid         = id;
   this->nodeType     = nodeType;
@@ -663,8 +663,11 @@ pnet(pec,pconf), cnet(cec,cconf) {
   this->priv         = priv;
   this->maxViews     = maxViews;
   this->kf           = k;
-  // One Redis-backed KV executor per replica (local port = 6379 + replica id).
-  this->kvExecutor.reset(new KVAppExecutor(static_cast<int>(this->myid), 6379 + static_cast<int>(this->myid)));
+  // Ordinary experiments use the in-process KV state machine. Redis is an
+  // explicit benchmark mode selected by the final server argument.
+  this->kvExecutor.reset(new KVAppExecutor(static_cast<int>(this->myid),
+                                           6379 + static_cast<int>(this->myid),
+                                           useRedis));
   this->fastQC       = this->totalTEE >= this->tqsize;
 #if defined(BASIC_HYBRID_TEE) || defined(BASIC_HYBRID_TEE_DEBUG)
   // View 0 belongs to the genesis block.  The first protocol proposal is

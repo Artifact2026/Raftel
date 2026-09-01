@@ -54,22 +54,22 @@ class KVAppExecutor {
  private:
   int replica_id;
   int redis_port;
+  bool use_redis;
 #if KVAPP_HAS_HIREDIS
   redisContext *redis_ctx = nullptr;
 #else
   void *redis_ctx = nullptr;
 #endif
   std::unordered_map<std::string, AppReply> dedup_cache;
-  std::unordered_map<std::string, std::string> mem_fallback;
-  bool warned_redis_unavailable = false;
+  std::unordered_map<std::string, std::string> mem_store;
 
   std::string dedupKey(int client_id, int req_id) const;
   bool ensureRedisConnected();
   AppReply execRedis(const AppRequest &req);
-  AppReply execFallback(const AppRequest &req);
+  AppReply execMemory(const AppRequest &req);
 
  public:
-  KVAppExecutor(int rid, int port);
+  KVAppExecutor(int rid, int port, bool useRedis);
   ~KVAppExecutor();
   AppReply execute(const AppRequest &req);
 };

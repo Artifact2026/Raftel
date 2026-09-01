@@ -26,6 +26,7 @@
 
 using MsgNet    = salticidae::MsgNetwork<uint8_t>;
 using Clock     = std::chrono::time_point<std::chrono::steady_clock>;
+using WallClock = std::chrono::time_point<std::chrono::system_clock>;
 using TransInfo = std::tuple<unsigned int,Clock,Transaction>; // int: number of replies
 
 const uint8_t MsgTransaction::opcode;
@@ -50,6 +51,7 @@ unsigned int totaltee = 0;            // total number of TEE nodes
 std::map<TID,TransInfo> transactions; // current transactions
 std::map<TID,double> execTrans;       // set of executed transaction ids
 std::map<TID,Clock> execReplyTimes;   // client-side completion timestamp per transaction
+std::map<TID,WallClock> execReplyWallTimes; // comparable across client processes
 unsigned int sleepTime = 1;           // time the client sleeps between two sends (in microseconds)
 unsigned int kvSetRatio = 30;         // percentage
 unsigned int kvGetRatio = 60;         // percentage
@@ -151,6 +153,8 @@ void printStats() {
 
   Clock firstReply = end;
   Clock lastReply = beginning;
+  long long firstReplyUnixUs = 0;
+  long long lastReplyUnixUs = 0;
   if (!execReplyTimes.empty()) {
     auto firstIt = std::min_element(execReplyTimes.begin(), execReplyTimes.end(),
       [](const std::pair<const TID,Clock> &a, const std::pair<const TID,Clock> &b) {
@@ -162,6 +166,20 @@ void printStats() {
       });
     firstReply = firstIt->second;
     lastReply = lastIt->second;
+  }
+  if (!execReplyWallTimes.empty()) {
+    auto firstWallIt = std::min_element(execReplyWallTimes.begin(), execReplyWallTimes.end(),
+      [](const std::pair<const TID,WallClock> &a, const std::pair<const TID,WallClock> &b) {
+        return a.second < b.second;
+      });
+    auto lastWallIt = std::max_element(execReplyWallTimes.begin(), execReplyWallTimes.end(),
+      [](const std::pair<const TID,WallClock> &a, const std::pair<const TID,WallClock> &b) {
+        return a.second < b.second;
+      });
+    firstReplyUnixUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        firstWallIt->second.time_since_epoch()).count();
+    lastReplyUnixUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        lastWallIt->second.time_since_epoch()).count();
   }
   double replyWindowUs = std::chrono::duration_cast<std::chrono::microseconds>(lastReply - firstReply).count();
   double replyWindowSec = (replyWindowUs <= 0.0) ? secs : (replyWindowUs / 1000.0 / 1000.0);
@@ -182,6 +200,8 @@ void printStats() {
   e << "duration_total_sec " << secs << "\n";
   e << "duration_reply_window_sec " << replyWindowSec << "\n";
   e << "num_completed " << execTrans.size() << "\n";
+  e << "first_reply_unix_us " << firstReplyUnixUs << "\n";
+  e << "last_reply_unix_us " << lastReplyUnixUs << "\n";
   e.close();
 
   if (DEBUGC) { std::cout << KMAG << cnfo() << "#before=" << execTrans.size() << ";#after=" << allLatencies.size() << KNRM << std::endl; }
@@ -210,6 +230,7 @@ void executed(TID tid) {
     double time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     execTrans[tid]=time;
     execReplyTimes[tid]=end;
+    execReplyWallTimes[tid]=std::chrono::system_clock::now();
   }
 }
 

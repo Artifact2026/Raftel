@@ -212,6 +212,7 @@ def ssh_exec_server_non_blocking(
     leader_mode="rotate",
     leader_id=0,
     clear_remote_stats: bool = True,
+    redis_enabled: bool = False,
 ):
     ssh = SSHClient()
     ssh.set_missing_host_key_policy(AutoAddPolicy())
@@ -219,10 +220,11 @@ def ssh_exec_server_non_blocking(
     nodeType = "TEE" if id < totaltee else "nonTEE"
     vc_to = float(timeout if view_timeout is None else view_timeout)
     rm_stats = "rm -rf stats/* && " if clear_remote_stats else ""
+    app_backend = "redis" if redis_enabled else "memory"
     if debug:
-        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./server {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} {leader_mode} {leader_id} > out{id}"
+        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./server {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} {leader_mode} {leader_id} {app_backend} > out{id}"
     else:
-        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./sgxserver {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} {leader_mode} {leader_id} > out{id}"
+        cmd = f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/sgxsdk/sdk_libs && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib && cd {REMOTE_PROJECT_ROOT} && {rm_stats}./sgxserver {id} {nodeType} {totaltee} {faults} {factor} {num_views} {vc_to} {opdist} {leader_mode} {leader_id} {app_backend} > out{id}"
     stdin, stdout, stderr = ssh.exec_command(cmd)
 
     # Non-blocking monitoring of command execution status
@@ -356,6 +358,7 @@ def start_all_sgxservers(
     leader_mode="rotate",
     leader_id=0,
     clear_remote_stats: bool = True,
+    redis_enabled: bool = False,
 ):
     completion_set = set()
     lock = threading.Lock()
@@ -379,6 +382,7 @@ def start_all_sgxservers(
                 leader_mode=leader_mode,
                 leader_id=leader_id,
                 clear_remote_stats=clear_remote_stats,
+                redis_enabled=redis_enabled,
             )
             for id, host, port1, port2 in servers
         ]
@@ -591,13 +595,16 @@ def clear_local_stats():
         shutil.rmtree(stats_dir)
     stats_dir.mkdir(parents=True, exist_ok=True)
 
-def cleanup_local_processes_and_ports(local_ports=None):
+def cleanup_local_processes_and_ports(local_ports=None, include_redis=False):
     """
     Best-effort cleanup for local experiments:
     - kill known server/client binaries
     - free the provided TCP ports with fuser
     """
-    subprocess.run("killall -q sgxserver sgxclient server client redis-server", shell=True)
+    process_names = "sgxserver sgxclient server client"
+    if include_redis:
+        process_names += " redis-server"
+    subprocess.run(f"killall -q {process_names}", shell=True)
     if local_ports:
         ports = " ".join(map(lambda p: f"{p}/tcp", local_ports))
         subprocess.run(f"fuser -k {ports}", shell=True)
@@ -657,6 +664,7 @@ def start_local_server_process(
     local_opdist: int,
     leader_mode: str = "rotate",
     leader_id: int = 0,
+    redis_enabled: bool = False,
 ):
     """
     Start one local replica process without shell wrapping, so kill/terminate
@@ -674,6 +682,7 @@ def start_local_server_process(
         str(local_opdist),
         leader_mode,
         str(leader_id),
+        "redis" if redis_enabled else "memory",
     ]
     return Popen(cmd, cwd=str(PROJECT_ROOT), preexec_fn=os.setsid)
 
@@ -1028,6 +1037,7 @@ def parse_client_e2e_stats(stats_directory: str):
         "e2e_latency_p95_ms": [],
         "e2e_latency_p99_ms": [],
     }
+    client_windows = []
     parsed_files = 0
     for fp in e2e_files:
         file_vals = {}
@@ -1046,6 +1056,11 @@ def parse_client_e2e_stats(stats_directory: str):
                             file_vals[key] = float(val)
                         except ValueError:
                             pass
+                    elif key in ("num_completed", "first_reply_unix_us", "last_reply_unix_us"):
+                        try:
+                            file_vals[key] = float(val)
+                        except ValueError:
+                            pass
         except OSError:
             continue
 
@@ -1054,6 +1069,13 @@ def parse_client_e2e_stats(stats_directory: str):
             for k in metrics:
                 if k in file_vals:
                     metrics[k].append(file_vals[k])
+            if all(k in file_vals for k in
+                   ("num_completed", "first_reply_unix_us", "last_reply_unix_us")):
+                client_windows.append((
+                    file_vals["num_completed"],
+                    file_vals["first_reply_unix_us"],
+                    file_vals["last_reply_unix_us"],
+                ))
 
     if parsed_files == 0:
         return None
@@ -1061,6 +1083,32 @@ def parse_client_e2e_stats(stats_directory: str):
     avgs = {}
     for k, vals in metrics.items():
         avgs[k] = (sum(vals) / len(vals)) if vals else 0.0
+    # Aggregate concurrent clients as one system: all completed requests over
+    # the union of their reply windows.  Do not average per-client throughput.
+    if len(client_windows) == parsed_files and client_windows:
+        total_completed = sum(w[0] for w in client_windows)
+        global_first_us = min(w[1] for w in client_windows)
+        global_last_us = max(w[2] for w in client_windows)
+        global_window_sec = (global_last_us - global_first_us) / 1_000_000.0
+        if global_window_sec > 0.0:
+            avgs["reply_throughput_ktps"] = (total_completed / global_window_sec) / 1000.0
+        elif parsed_files == 1:
+            # Preserve the client's duration-based fallback for a one-request run.
+            avgs["reply_throughput_ktps"] = metrics["reply_throughput_ktps"][0]
+        else:
+            avgs["reply_throughput_ktps"] = 0.0
+        avgs["num_completed"] = total_completed
+        avgs["global_reply_window_sec"] = global_window_sec
+        avgs["throughput_aggregation"] = "global"
+    else:
+        # A per-client average is not a system throughput.  A single legacy
+        # file is still unambiguous; multiple old files must be regenerated.
+        if parsed_files > 1:
+            raise RuntimeError(
+                "cannot aggregate multi-client throughput: client-e2e files lack "
+                "num_completed/first_reply_unix_us/last_reply_unix_us; rebuild the client"
+            )
+        avgs["throughput_aggregation"] = "single_client_legacy"
     avgs["num_client_e2e_files"] = parsed_files
     return avgs
 
@@ -1485,6 +1533,7 @@ def experiment_local(
     print_vals_means=False,
     cutoff_sec=None,
     stats_summary_label=None,
+    redis_enabled=False,
 ):
     """
     Local run aligned with experiments.py: execute() + computeStats() + computeAvgStats() loop.
@@ -1546,9 +1595,13 @@ def experiment_local(
         if rep == 0:
             pro_dir = effective_pro_dir
         # Cleanup BEFORE startup to avoid "Address already in use" from stale processes.
-        cleanup_local_processes_and_ports(allLocalPorts + allLocalRedisPorts)
+        cleanup_local_processes_and_ports(
+            allLocalPorts + (allLocalRedisPorts if redis_enabled else []),
+            include_redis=redis_enabled,
+        )
         clear_local_stats()
-        start_local_redis_instances(total)
+        if redis_enabled:
+            start_local_redis_instances(total)
 
         rep_procs = []
         client_procs = []
@@ -1570,6 +1623,7 @@ def experiment_local(
                     local_opdist,
                     leader_mode,
                     leader_id,
+                    redis_enabled,
                 )
                 rep_procs.append(("R", i, p))
 
@@ -1608,6 +1662,11 @@ def experiment_local(
                 for (tag, rid, proc) in remaining:
                     done_file_ready = len(glob.glob(statsdir + "/done-" + str(rid) + "*")) > 0
                     proc_exited = (proc.poll() is not None)
+                    if proc_exited and proc.returncode != 0:
+                        raise RuntimeError(
+                            f"replica {rid} exited with status {proc.returncode}; "
+                            "inspect the replica stderr above"
+                        )
                     if not done_file_ready and not proc_exited:
                         updated_remaining.append((tag, rid, proc))
                 remaining = updated_remaining
@@ -1663,7 +1722,10 @@ def experiment_local(
                     kill_local_process_tree(p)
             close_client_log_handles(client_procs)
             # Always cleanup ports even on exceptions / KeyboardInterrupt.
-            cleanup_local_processes_and_ports(allLocalPorts + allLocalRedisPorts)
+            cleanup_local_processes_and_ports(
+                allLocalPorts + (allLocalRedisPorts if redis_enabled else []),
+                include_redis=redis_enabled,
+            )
 
         (
             throughput_view,
@@ -1824,6 +1886,7 @@ def experiment_fault_local(
     live_plot_exclude_fault_node=True,
     live_plot_aggregate_median=False,
     stats_summary_label=None,
+    redis_enabled=False,
 ):
     """
     Local experiment with one replica crash during execution.
@@ -1881,9 +1944,13 @@ def experiment_fault_local(
         if rep == 0:
             pro_dir = effective_pro_dir
 
-        cleanup_local_processes_and_ports(allLocalPorts + allLocalRedisPorts)
+        cleanup_local_processes_and_ports(
+            allLocalPorts + (allLocalRedisPorts if redis_enabled else []),
+            include_redis=redis_enabled,
+        )
         clear_local_stats()
-        start_local_redis_instances(total)
+        if redis_enabled:
+            start_local_redis_instances(total)
 
         rep_procs = []
         client_procs = []
@@ -1906,6 +1973,7 @@ def experiment_fault_local(
                     local_opdist,
                     leader_mode,
                     leader_id,
+                    redis_enabled,
                 )
                 rep_procs.append(("R", i, p))
 
@@ -1958,6 +2026,11 @@ def experiment_fault_local(
                 for (tag, rid, proc) in remaining:
                     done_file_ready = len(glob.glob(statsdir + "/done-" + str(rid) + "*")) > 0
                     proc_exited = (proc.poll() is not None)
+                    if proc_exited and proc.returncode != 0 and rid != dead_node_id:
+                        raise RuntimeError(
+                            f"replica {rid} exited with status {proc.returncode}; "
+                            "inspect the replica stderr above"
+                        )
                     if not done_file_ready and not proc_exited:
                         updated_remaining.append((tag, rid, proc))
                 remaining = updated_remaining
@@ -2015,7 +2088,10 @@ def experiment_fault_local(
                     print("still running:", ("C", idx, p.poll()))
                     kill_local_process_tree(p)
             close_client_log_handles(client_procs)
-            cleanup_local_processes_and_ports(allLocalPorts + allLocalRedisPorts)
+            cleanup_local_processes_and_ports(
+                allLocalPorts + (allLocalRedisPorts if redis_enabled else []),
+                include_redis=redis_enabled,
+            )
 
         (
             throughput_view,
@@ -2192,6 +2268,7 @@ def experiment_fault_cloud(
     live_plot_exclude_fault_node=True,
     live_plot_aggregate_median=False,
     stats_summary_label=None,
+    redis_enabled=False,
 ):
     """
     Cloud/SSH cluster: one replica is killed and stays down until experiment cleanup while live
@@ -2244,7 +2321,8 @@ def experiment_fault_cloud(
     ssh_clear_repo_out_logs_on_hosts(ips)
     scp_files_to_nodes(ips, files_to_copy)
 
-    start_remote_redis_for_servers(servers)
+    if redis_enabled:
+        start_remote_redis_for_servers(servers)
 
     vc = float(timeout if view_timeout is None else view_timeout)
     print(
@@ -2265,6 +2343,7 @@ def experiment_fault_cloud(
         leader_mode=leader_mode,
         leader_id=leader_id,
         clear_remote_stats=True,
+        redis_enabled=redis_enabled,
     )
 
     stop_poll = threading.Event()
@@ -2421,6 +2500,7 @@ def experiment(
     leader_mode="rotate",
     leader_id=0,
     stats_summary_label=None,
+    redis_enabled=False,
 ):
     """
     Remote cluster run aligned with experiment_local(): Redis per replica, server argv includes
@@ -2467,7 +2547,8 @@ def experiment(
     scp_files_to_nodes(ips, files_to_copy)
 
     # Same ordering as experiment_local: Redis before replicas.
-    start_remote_redis_for_servers(servers)
+    if redis_enabled:
+        start_remote_redis_for_servers(servers)
 
     # Multi-threaded SSH execution sgxserver (num_views / opdist match local server argv)
     completion_set, lock = start_all_sgxservers(
@@ -2481,6 +2562,7 @@ def experiment(
         view_timeout=view_timeout,
         leader_mode=leader_mode,
         leader_id=leader_id,
+        redis_enabled=redis_enabled,
     )
     print("start")
     wait_before_client = 5 + int(math.ceil(math.log(faults, 2)))
@@ -2589,7 +2671,7 @@ def main():
     parser.add_argument('--batchsize', type=int,  default=400, help='MAX_NUM_TRANSACTIONS in params (compile-time batch capacity)')
     parser.add_argument('--payload',   type=int,  default=256, help='Payload size')
     parser.add_argument('--faults',    type=int,  default=1,   help='Number of faults')
-    parser.add_argument('--totaltee',  type=int,  default=0,   help='Number of TEE nodes')
+    parser.add_argument('--totaltee',  type=int,  default=0,   help='Number of TEE nodes (p01 overrides this with faults + 1)')
     parser.add_argument('--pct',       type=int,  default=0,   help='counter delay')
     # Local experiment parity with experiments.py (execute/computeAvgStats)
     parser.add_argument('--views',type=int,default=10,help='numViews passed to each server (default 10, same as experiments.py)',)
@@ -2607,6 +2689,11 @@ def main():
     parser.add_argument('--kv-del-ratio', type=int, default=0, help='KV workload DEL ratio (percentage-like weight)')
     parser.add_argument('--kv-keyspace', type=int, default=1000, help='KV workload keyspace size')
     parser.add_argument('--kv-value-len', type=int, default=16, help='KV workload SET value length')
+    parser.add_argument(
+        '--redis',
+        action='store_true',
+        help='run the dedicated Redis-backed KV experiment path (default: in-memory KV, no Redis startup)',
+    )
     # Local fault injection (one replica crash during local experiment).
     parser.add_argument('--fault-local',action='store_true',help='simulate one replica crash during local run (kills a server process mid-run)',)
     parser.add_argument('--fault-node-id',type=int,default=1,help='replica index to kill in --fault-local mode (default 1)',)
@@ -2681,6 +2768,11 @@ def main():
 
     factor = protocol_factor(Protocol)
     totalnodes = num_replicas(factor, args.faults)
+    # Chained-HybridTEE uses the minimum trusted population required by its
+    # TEE quorum: m = f + 1.  Apply this before generating configs and binaries
+    # so runtime node roles and compile-time quorum capacities stay aligned.
+    if Protocol == "Chained-HybridTEE":
+        args.totaltee = args.faults + 1
     # Upstream BASIC_CHEAP_AND_QUICK assumes every replica owns the trusted
     # Checker+Accumulator component.  Keep the generated node configuration
     # consistent with that model.
@@ -2724,6 +2816,7 @@ def main():
                 live_plot_exclude_fault_node=not args.live_plot_include_fault_node,
                 live_plot_aggregate_median=args.live_plot_median,
                 stats_summary_label=args.stats_summary_label,
+                redis_enabled=args.redis,
             )
         else:
             experiment_local(
@@ -2746,6 +2839,7 @@ def main():
                 print_vals_means=args.print_vals_mean,
                 cutoff_sec=args.cutoff_sec,
                 stats_summary_label=args.stats_summary_label,
+                redis_enabled=args.redis,
             )
     else:
         if getattr(args, "fault_cloud", False):
@@ -2772,6 +2866,7 @@ def main():
                 live_plot_exclude_fault_node=not args.live_plot_include_fault_node,
                 live_plot_aggregate_median=args.live_plot_median,
                 stats_summary_label=args.stats_summary_label,
+                redis_enabled=args.redis,
             )
         else:
             experiment(
@@ -2791,6 +2886,7 @@ def main():
                 leader_mode=args.leader_mode,
                 leader_id=args.leader_id,
                 stats_summary_label=args.stats_summary_label,
+                redis_enabled=args.redis,
             )
 
 

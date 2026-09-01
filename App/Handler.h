@@ -460,7 +460,7 @@ class Handler {
   void handle_ldrprepare_ch_comb(MsgLdrPrepareChComb msg, const PeerNet::conn_t &conn);
 
  public:
-  Handler(KeysFun kf, PID id, bool nodeType, unsigned long int timeout, unsigned int opdist, unsigned int constFactor, unsigned int numFaults, unsigned int totaltee, unsigned int maxViews, Nodes nodes, KEY priv, PeerNet::Config pconf, ClientNet::Config cconf, bool fixedLeaderMode = false, PID fixedLeader = 0);
+  Handler(KeysFun kf, PID id, bool nodeType, unsigned long int timeout, unsigned int opdist, unsigned int constFactor, unsigned int numFaults, unsigned int totaltee, unsigned int maxViews, Nodes nodes, KEY priv, PeerNet::Config pconf, ClientNet::Config cconf, bool fixedLeaderMode = false, PID fixedLeader = 0, bool useRedis = false);
 };
 
 
